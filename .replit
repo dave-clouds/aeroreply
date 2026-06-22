@@ -76,3 +76,10 @@ externalPort = 8000
 deploymentTarget = "vm"
 run = ["bash", "-c", "cd ai-python && uvicorn main:app --host 0.0.0.0 --port 8000 & cd gateway-node && node server.js & cd client-react && npx serve dist -l 5000 -s"]
 build = ["bash", "-c", "cd client-react && npm install && npm run build && cd ../gateway-node && npm install && pip install fastapi uvicorn pydantic requests"]
+
+[userenv]
+
+[userenv.shared]
+AI_SERVICE_URL = "http://localhost:8000"
+GATEWAY_PORT = "3001"
+NODE_ENV = "development"

@@ -2,34 +2,144 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const mongoose = require('mongoose');
 
-// Initialize Express App
+const { registerSocketHandlers } = require('./socketHandlers');
+const { notFound, errorHandler } = require('./middleware/errorHandler');
+const Ticket = require('./models/Ticket');
+
+// ---------------------------------------------------------------------------
+// App bootstrap
+// ---------------------------------------------------------------------------
 const app = express();
-app.use(cors()); // Allows your React frontend to connect securely
-app.use(express.json()); // Allows the server to understand incoming JSON data
 
-// Create HTTP server wrapper required by Socket.io
+app.use(cors({ origin: '*' }));
+app.use(express.json());
+
+// ---------------------------------------------------------------------------
+// MongoDB connection
+// ---------------------------------------------------------------------------
+const MONGODB_URI = process.env.MONGODB_URI;
+
+let dbConnected = false;
+
+if (MONGODB_URI) {
+  mongoose
+    .connect(MONGODB_URI)
+    .then(() => {
+      dbConnected = true;
+      console.log('[DB] MongoDB connected successfully');
+    })
+    .catch((err) => {
+      console.warn(`[DB] MongoDB connection failed: ${err.message}`);
+      console.warn('[DB] Running in DB-less mode — ticket persistence disabled');
+    });
+
+  mongoose.connection.on('disconnected', () => {
+    dbConnected = false;
+    console.warn('[DB] MongoDB disconnected');
+  });
+  mongoose.connection.on('reconnected', () => {
+    dbConnected = true;
+    console.log('[DB] MongoDB reconnected');
+  });
+} else {
+  console.warn('[DB] MONGODB_URI not set — running in DB-less mode (ticket persistence disabled)');
+}
+
+// ---------------------------------------------------------------------------
+// HTTP server + Socket.io
+// ---------------------------------------------------------------------------
 const server = http.createServer(app);
+
 const io = new Server(server, {
-  cors: { origin: "*" } // Allows incoming real-time socket connections from any client
+  cors: { origin: '*' },
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
-// A simple test endpoint to check if the server is healthy
+registerSocketHandlers(io);
+
+// ---------------------------------------------------------------------------
+// REST routes
+// ---------------------------------------------------------------------------
+
 app.get('/health', (req, res) => {
-  res.json({ status: "Gateway Node is running perfectly!" });
-});
-
-// Setup Real-time connection listener
-io.on('connection', (socket) => {
-  console.log('A client connected over WebSocket! ID:', socket.id);
-
-  socket.on('disconnect', () => {
-    console.log('A client disconnected:', socket.id);
+  res.json({
+    status: 'ok',
+    service: 'AeroReply Gateway',
+    db: dbConnected ? 'connected' : 'disconnected',
+    uptime: Math.floor(process.uptime()),
   });
 });
 
-// Fire up our server on Port 3001
+// List all tickets (open + handoff by default)
+app.get('/api/tickets', async (req, res, next) => {
+  try {
+    const { status } = req.query;
+    const filter = status ? { status } : { status: { $in: ['open', 'handoff'] } };
+    const tickets = await Ticket.find(filter)
+      .select('-messages')
+      .sort({ updatedAt: -1 })
+      .limit(100);
+    res.json({ tickets });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Get a single ticket with full message history
+app.get('/api/tickets/:conversationId', async (req, res, next) => {
+  try {
+    const ticket = await Ticket.findOne({ conversationId: req.params.conversationId });
+    if (!ticket) {
+      const err = new Error('Ticket not found');
+      err.status = 404;
+      return next(err);
+    }
+    res.json({ ticket });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Update ticket status (e.g. mark as closed)
+app.patch('/api/tickets/:conversationId/status', async (req, res, next) => {
+  try {
+    const { status } = req.body;
+    const allowed = ['open', 'handoff', 'closed'];
+    if (!allowed.includes(status)) {
+      const err = new Error(`Invalid status. Must be one of: ${allowed.join(', ')}`);
+      err.status = 400;
+      return next(err);
+    }
+    const ticket = await Ticket.findOneAndUpdate(
+      { conversationId: req.params.conversationId },
+      { $set: { status } },
+      { new: true }
+    );
+    if (!ticket) {
+      const err = new Error('Ticket not found');
+      err.status = 404;
+      return next(err);
+    }
+    res.json({ ticket });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Error handling (must be registered last)
+// ---------------------------------------------------------------------------
+app.use(notFound);
+app.use(errorHandler);
+
+// ---------------------------------------------------------------------------
+// Start server
+// ---------------------------------------------------------------------------
 const PORT = process.env.GATEWAY_PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`[Gateway] Server is buzzing on port ${PORT}`);
+  console.log(`[Gateway] Server running on port ${PORT}`);
+  console.log(`[Gateway] AI service target: ${process.env.AI_SERVICE_URL || 'http://localhost:8000'}`);
 });
