@@ -28,8 +28,8 @@ io.on('connection', (socket) => {
   });
 });
 
-// Fire up our server on Port 5000
-const PORT = 5000;
+// Fire up our server on Port 3001
+const PORT = process.env.GATEWAY_PORT || 3001;
 server.listen(PORT, () => {
   console.log(`[Gateway] Server is buzzing on port ${PORT}`);
 });
