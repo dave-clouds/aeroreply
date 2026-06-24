@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSocket } from '../context/SocketContext'
 
 export default function AgentDashboard() {
@@ -10,10 +10,15 @@ export default function AgentDashboard() {
 
   const [activeConv, setActiveConv] = useState(null)
   const [chatLog, setChatLog] = useState([])
+  const [historyState, setHistoryState] = useState('idle')
   const [reply, setReply] = useState('')
   const [joinedConvs, setJoinedConvs] = useState(new Set())
+
   const bottomRef = useRef(null)
-  const activeConvRef = useRef(activeConv)
+  const activeConvRef = useRef(null)
+  const historyLoadedRef = useRef(false)
+  const pendingMessagesRef = useRef([])
+  const historyAbortRef = useRef(null)
 
   useEffect(() => {
     activeConvRef.current = activeConv
@@ -80,11 +85,15 @@ export default function AgentDashboard() {
             : t
         )
       )
-      if (conversationId === activeConvRef.current) {
-        setChatLog((prev) => [
-          ...prev,
-          { role: 'customer', content: message, timestamp },
-        ])
+
+      if (conversationId !== activeConvRef.current) return
+
+      const entry = { role: 'customer', content: message, timestamp }
+
+      if (!historyLoadedRef.current) {
+        pendingMessagesRef.current.push(entry)
+      } else {
+        setChatLog((prev) => [...prev, entry])
       }
     }
 
@@ -95,14 +104,16 @@ export default function AgentDashboard() {
         )
       )
       if (conversationId === activeConvRef.current) {
-        setChatLog((prev) => [
-          ...prev,
-          {
-            role: 'system',
-            content: 'Ticket closed.',
-            timestamp: new Date().toISOString(),
-          },
-        ])
+        const entry = {
+          role: 'system',
+          content: 'Ticket closed.',
+          timestamp: new Date().toISOString(),
+        }
+        if (!historyLoadedRef.current) {
+          pendingMessagesRef.current.push(entry)
+        } else {
+          setChatLog((prev) => [...prev, entry])
+        }
       }
     }
 
@@ -123,13 +134,62 @@ export default function AgentDashboard() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatLog])
 
-  function openConversation(conversationId) {
-    setActiveConv(conversationId)
-    setChatLog([])
-    if (!joinedConvs.has(conversationId) && socket) {
-      socket.emit('agent:join', { conversationId })
-    }
-  }
+  const openConversation = useCallback(
+    async (conversationId) => {
+      if (historyAbortRef.current) {
+        historyAbortRef.current.abort()
+      }
+
+      const controller = new AbortController()
+      historyAbortRef.current = controller
+
+      setActiveConv(conversationId)
+      activeConvRef.current = conversationId
+      setChatLog([])
+      setHistoryState('loading')
+      historyLoadedRef.current = false
+      pendingMessagesRef.current = []
+
+      if (socket && !joinedConvs.has(conversationId)) {
+        socket.emit('agent:join', { conversationId })
+      }
+
+      try {
+        const res = await fetch(`/api/tickets/${conversationId}`, {
+          signal: controller.signal,
+        })
+        if (!res.ok) throw new Error(`Server returned ${res.status}`)
+        const { ticket } = await res.json()
+
+        if (controller.signal.aborted) return
+
+        const history = (ticket.messages ?? []).map((m) => ({
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp,
+        }))
+
+        const seen = new Set(history.map((m) => `${m.role}:${m.content}`))
+        const fresh = pendingMessagesRef.current.filter(
+          (m) => !seen.has(`${m.role}:${m.content}`)
+        )
+
+        setChatLog([...history, ...fresh])
+        historyLoadedRef.current = true
+        pendingMessagesRef.current = []
+        setHistoryState('done')
+      } catch (err) {
+        if (err.name === 'AbortError') return
+
+        historyLoadedRef.current = true
+        const buffered = pendingMessagesRef.current
+        pendingMessagesRef.current = []
+        if (buffered.length > 0) setChatLog(buffered)
+        setHistoryState('error')
+      }
+    },
+    [socket, joinedConvs]
+  )
 
   function sendReply(e) {
     e.preventDefault()
@@ -166,7 +226,6 @@ export default function AgentDashboard() {
         </div>
       )
     }
-
     if (fetchState === 'error') {
       return (
         <div style={styles.feedbackWrap}>
@@ -182,11 +241,9 @@ export default function AgentDashboard() {
         </div>
       )
     }
-
     if (sortedTickets.length === 0) {
       return <p style={styles.emptyHint}>No active tickets.</p>
     }
-
     return (
       <ul style={styles.ticketList}>
         {sortedTickets.map((t) => (
@@ -237,6 +294,13 @@ export default function AgentDashboard() {
     )
   }
 
+  function roleMeta(role) {
+    if (role === 'agent') return { label: 'You', bg: '#10b981', align: 'flex-end' }
+    if (role === 'ai') return { label: 'AI', bg: '#6d28d9', align: 'flex-start' }
+    if (role === 'system') return { label: '', bg: '#374151', align: 'center' }
+    return { label: 'Customer', bg: '#1f2937', align: 'flex-start' }
+  }
+
   return (
     <div style={styles.shell}>
       <aside style={styles.sidebar}>
@@ -254,7 +318,6 @@ export default function AgentDashboard() {
             />
           </div>
         </div>
-
         <SidebarContent />
       </aside>
 
@@ -264,7 +327,25 @@ export default function AgentDashboard() {
         ) : (
           <>
             <div style={styles.convHeader}>
-              <span style={styles.convId}>{activeConv}</span>
+              <div style={styles.convMeta}>
+                <span style={styles.convId}>{activeConv}</span>
+                {historyState === 'loading' && (
+                  <span style={styles.loadingChip}>
+                    <span style={styles.chipSpinner} />
+                    Loading history…
+                  </span>
+                )}
+                {historyState === 'error' && (
+                  <span style={{ ...styles.loadingChip, color: '#f87171' }}>
+                    History unavailable — live mode
+                  </span>
+                )}
+                {historyState === 'done' && (
+                  <span style={{ ...styles.loadingChip, color: '#6b7280' }}>
+                    {chatLog.length} message{chatLog.length !== 1 ? 's' : ''} loaded
+                  </span>
+                )}
+              </div>
               <button
                 style={{
                   ...styles.closeBtn,
@@ -279,43 +360,43 @@ export default function AgentDashboard() {
             </div>
 
             <div style={styles.chatLog}>
-              {chatLog.length === 0 && (
-                <p style={styles.emptyHint}>
-                  Waiting for messages from the customer…
-                </p>
-              )}
-              {chatLog.map((msg, i) => (
-                <div
-                  key={i}
-                  style={{
-                    ...styles.bubble,
-                    alignSelf:
-                      msg.role === 'agent'
-                        ? 'flex-end'
-                        : msg.role === 'system'
-                        ? 'center'
-                        : 'flex-start',
-                    background:
-                      msg.role === 'agent'
-                        ? '#10b981'
-                        : msg.role === 'system'
-                        ? '#374151'
-                        : '#1f2937',
-                    color: '#fff',
-                    fontStyle: msg.role === 'system' ? 'italic' : 'normal',
-                    fontSize: msg.role === 'system' ? '12px' : '14px',
-                  }}
-                >
-                  <span style={styles.bubbleSender}>
-                    {msg.role === 'agent'
-                      ? 'You'
-                      : msg.role === 'system'
-                      ? ''
-                      : 'Customer'}
-                  </span>
-                  {msg.content}
+              {historyState === 'loading' && chatLog.length === 0 && (
+                <div style={styles.historyLoader}>
+                  <div style={styles.spinner} />
+                  <p style={{ margin: '8px 0 0', color: '#6b7280', fontSize: '13px' }}>
+                    Fetching conversation history…
+                  </p>
                 </div>
-              ))}
+              )}
+              {historyState !== 'loading' && chatLog.length === 0 && (
+                <p style={styles.emptyHint}>No messages in this conversation yet.</p>
+              )}
+              {chatLog.map((msg, i) => {
+                const { label, bg, align } = roleMeta(msg.role)
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      ...styles.bubble,
+                      alignSelf: align,
+                      background: bg,
+                      fontStyle: msg.role === 'system' ? 'italic' : 'normal',
+                      fontSize: msg.role === 'system' ? '12px' : '14px',
+                    }}
+                  >
+                    {label && <span style={styles.bubbleSender}>{label}</span>}
+                    <span>{msg.content}</span>
+                    {msg.timestamp && msg.role !== 'system' && (
+                      <span style={styles.bubbleTime}>
+                        {new Date(msg.timestamp).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
               <div ref={bottomRef} />
             </div>
 
@@ -323,7 +404,13 @@ export default function AgentDashboard() {
               <input
                 style={styles.input}
                 type="text"
-                placeholder={isClosed ? 'Ticket is closed.' : 'Type a reply…'}
+                placeholder={
+                  isClosed
+                    ? 'Ticket is closed.'
+                    : historyState === 'loading'
+                    ? 'Loading history…'
+                    : 'Type a reply…'
+                }
                 value={reply}
                 onChange={(e) => setReply(e.target.value)}
                 disabled={isClosed || !connected}
@@ -396,6 +483,7 @@ const styles = {
     height: '10px',
     borderRadius: '50%',
     display: 'inline-block',
+    flexShrink: 0,
   },
   feedbackWrap: {
     display: 'flex',
@@ -417,6 +505,7 @@ const styles = {
     borderTop: '2px solid #60a5fa',
     borderRadius: '50%',
     animation: 'spin 0.8s linear infinite',
+    flexShrink: 0,
   },
   ticketList: {
     listStyle: 'none',
@@ -489,6 +578,13 @@ const styles = {
     padding: '10px 16px',
     borderBottom: '1px solid #374151',
     background: '#1f2937',
+    gap: '8px',
+  },
+  convMeta: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    minWidth: 0,
   },
   convId: {
     fontFamily: 'monospace',
@@ -497,6 +593,22 @@ const styles = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+  },
+  loadingChip: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px',
+    fontSize: '11px',
+    color: '#60a5fa',
+  },
+  chipSpinner: {
+    width: '10px',
+    height: '10px',
+    border: '1.5px solid #374151',
+    borderTop: '1.5px solid #60a5fa',
+    borderRadius: '50%',
+    animation: 'spin 0.8s linear infinite',
+    flexShrink: 0,
   },
   closeBtn: {
     background: '#dc2626',
@@ -507,7 +619,14 @@ const styles = {
     fontSize: '12px',
     fontWeight: 600,
     flexShrink: 0,
-    marginLeft: '8px',
+  },
+  historyLoader: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    padding: '40px 0',
   },
   chatLog: {
     flex: 1,
@@ -526,12 +645,19 @@ const styles = {
     borderRadius: '10px',
     lineHeight: '1.45',
     wordBreak: 'break-word',
+    color: '#fff',
   },
   bubbleSender: {
     fontSize: '11px',
     opacity: 0.75,
     fontWeight: 600,
     marginBottom: '2px',
+  },
+  bubbleTime: {
+    fontSize: '10px',
+    opacity: 0.5,
+    marginTop: '3px',
+    alignSelf: 'flex-end',
   },
   replyForm: {
     display: 'flex',
