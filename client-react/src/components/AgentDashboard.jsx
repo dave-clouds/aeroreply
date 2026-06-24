@@ -3,12 +3,49 @@ import { useSocket } from '../context/SocketContext'
 
 export default function AgentDashboard() {
   const { socket, connected } = useSocket()
+
   const [tickets, setTickets] = useState([])
+  const [fetchState, setFetchState] = useState('loading')
+  const [fetchError, setFetchError] = useState(null)
+
   const [activeConv, setActiveConv] = useState(null)
   const [chatLog, setChatLog] = useState([])
   const [reply, setReply] = useState('')
   const [joinedConvs, setJoinedConvs] = useState(new Set())
   const bottomRef = useRef(null)
+  const activeConvRef = useRef(activeConv)
+
+  useEffect(() => {
+    activeConvRef.current = activeConv
+  }, [activeConv])
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    fetch('/api/tickets', { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Server returned ${res.status}`)
+        return res.json()
+      })
+      .then(({ tickets: fetched }) => {
+        setTickets(
+          fetched.map((t) => ({
+            conversationId: t.conversationId,
+            lastMessage: null,
+            timestamp: t.updatedAt,
+            status: t.status,
+          }))
+        )
+        setFetchState('done')
+      })
+      .catch((err) => {
+        if (err.name === 'AbortError') return
+        setFetchError(err.message)
+        setFetchState('error')
+      })
+
+    return () => controller.abort()
+  }, [])
 
   useEffect(() => {
     if (!socket) return
@@ -23,12 +60,26 @@ export default function AgentDashboard() {
 
     function onHandoffNewTicket({ conversationId, lastMessage, timestamp }) {
       setTickets((prev) => {
-        if (prev.find((t) => t.conversationId === conversationId)) return prev
+        const exists = prev.find((t) => t.conversationId === conversationId)
+        if (exists) {
+          return prev.map((t) =>
+            t.conversationId === conversationId
+              ? { ...t, lastMessage, timestamp, status: 'handoff' }
+              : t
+          )
+        }
         return [{ conversationId, lastMessage, timestamp, status: 'handoff' }, ...prev]
       })
     }
 
     function onAgentCustomerMessage({ conversationId, message, timestamp }) {
+      setTickets((prev) =>
+        prev.map((t) =>
+          t.conversationId === conversationId
+            ? { ...t, lastMessage: message, timestamp }
+            : t
+        )
+      )
       if (conversationId === activeConvRef.current) {
         setChatLog((prev) => [
           ...prev,
@@ -68,11 +119,6 @@ export default function AgentDashboard() {
     }
   }, [socket])
 
-  const activeConvRef = useRef(activeConv)
-  useEffect(() => {
-    activeConvRef.current = activeConv
-  }, [activeConv])
-
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatLog])
@@ -80,7 +126,7 @@ export default function AgentDashboard() {
   function openConversation(conversationId) {
     setActiveConv(conversationId)
     setChatLog([])
-    if (!joinedConvs.has(conversationId)) {
+    if (!joinedConvs.has(conversationId) && socket) {
       socket.emit('agent:join', { conversationId })
     }
   }
@@ -89,7 +135,6 @@ export default function AgentDashboard() {
     e.preventDefault()
     const text = reply.trim()
     if (!text || !socket || !activeConv) return
-
     socket.emit('agent:message', { conversationId: activeConv, message: text })
     setChatLog((prev) => [
       ...prev,
@@ -103,53 +148,114 @@ export default function AgentDashboard() {
     socket.emit('ticket:close', { conversationId: activeConv })
   }
 
+  const sortedTickets = [...tickets].sort((a, b) => {
+    const rank = { handoff: 0, open: 1, closed: 2 }
+    if (rank[a.status] !== rank[b.status]) return rank[a.status] - rank[b.status]
+    return new Date(b.timestamp) - new Date(a.timestamp)
+  })
+
   const activeTicket = tickets.find((t) => t.conversationId === activeConv)
   const isClosed = activeTicket?.status === 'closed'
+
+  function SidebarContent() {
+    if (fetchState === 'loading') {
+      return (
+        <div style={styles.feedbackWrap}>
+          <div style={styles.spinner} />
+          <p style={styles.feedbackText}>Loading tickets…</p>
+        </div>
+      )
+    }
+
+    if (fetchState === 'error') {
+      return (
+        <div style={styles.feedbackWrap}>
+          <p style={{ ...styles.feedbackText, color: '#f87171' }}>
+            Failed to load tickets
+          </p>
+          <p style={{ ...styles.feedbackText, fontSize: '11px', color: '#9ca3af' }}>
+            {fetchError}
+          </p>
+          <p style={{ ...styles.feedbackText, fontSize: '11px', color: '#6b7280' }}>
+            Real-time events will still appear below.
+          </p>
+        </div>
+      )
+    }
+
+    if (sortedTickets.length === 0) {
+      return <p style={styles.emptyHint}>No active tickets.</p>
+    }
+
+    return (
+      <ul style={styles.ticketList}>
+        {sortedTickets.map((t) => (
+          <li
+            key={t.conversationId}
+            style={{
+              ...styles.ticketItem,
+              background:
+                activeConv === t.conversationId ? '#374151' : 'transparent',
+              opacity: t.status === 'closed' ? 0.45 : 1,
+            }}
+            onClick={() => openConversation(t.conversationId)}
+          >
+            <div style={styles.ticketId}>{t.conversationId}</div>
+            <div style={styles.ticketPreview}>
+              {t.lastMessage ?? (
+                <span style={{ color: '#6b7280', fontStyle: 'italic' }}>
+                  history — click to join
+                </span>
+              )}
+            </div>
+            <div style={styles.ticketMeta}>
+              <span
+                style={{
+                  ...styles.statusPill,
+                  background:
+                    t.status === 'closed'
+                      ? '#374151'
+                      : t.status === 'open'
+                      ? '#065f46'
+                      : '#1d4ed8',
+                }}
+              >
+                {t.status}
+              </span>
+              {t.timestamp && (
+                <span style={styles.timeLabel}>
+                  {new Date(t.timestamp).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    )
+  }
 
   return (
     <div style={styles.shell}>
       <aside style={styles.sidebar}>
         <div style={styles.sidebarHeader}>
           <span style={styles.sidebarTitle}>Agent Dashboard</span>
-          <span
-            style={{
-              ...styles.dot,
-              background: connected ? '#22c55e' : '#f59e0b',
-            }}
-          />
+          <div style={styles.headerRight}>
+            {fetchState === 'done' && (
+              <span style={styles.ticketCount}>{sortedTickets.length}</span>
+            )}
+            <span
+              style={{
+                ...styles.dot,
+                background: connected ? '#22c55e' : '#f59e0b',
+              }}
+            />
+          </div>
         </div>
 
-        {tickets.length === 0 ? (
-          <p style={styles.emptyHint}>No handoff tickets yet.</p>
-        ) : (
-          <ul style={styles.ticketList}>
-            {tickets.map((t) => (
-              <li
-                key={t.conversationId}
-                style={{
-                  ...styles.ticketItem,
-                  background:
-                    activeConv === t.conversationId ? '#374151' : 'transparent',
-                  opacity: t.status === 'closed' ? 0.5 : 1,
-                }}
-                onClick={() => openConversation(t.conversationId)}
-              >
-                <div style={styles.ticketId}>{t.conversationId}</div>
-                <div style={styles.ticketPreview}>{t.lastMessage}</div>
-                <div style={styles.ticketMeta}>
-                  <span
-                    style={{
-                      ...styles.statusPill,
-                      background: t.status === 'closed' ? '#374151' : '#1d4ed8',
-                    }}
-                  >
-                    {t.status}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+        <SidebarContent />
       </aside>
 
       <main style={styles.main}>
@@ -272,11 +378,45 @@ const styles = {
     fontWeight: 700,
     fontSize: '15px',
   },
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  ticketCount: {
+    background: '#374151',
+    color: '#d1d5db',
+    fontSize: '11px',
+    fontWeight: 700,
+    padding: '1px 7px',
+    borderRadius: '999px',
+  },
   dot: {
     width: '10px',
     height: '10px',
     borderRadius: '50%',
     display: 'inline-block',
+  },
+  feedbackWrap: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '28px 16px',
+  },
+  feedbackText: {
+    margin: 0,
+    color: '#9ca3af',
+    fontSize: '13px',
+    textAlign: 'center',
+  },
+  spinner: {
+    width: '22px',
+    height: '22px',
+    border: '2px solid #374151',
+    borderTop: '2px solid #60a5fa',
+    borderRadius: '50%',
+    animation: 'spin 0.8s linear infinite',
   },
   ticketList: {
     listStyle: 'none',
@@ -309,7 +449,8 @@ const styles = {
   },
   ticketMeta: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   statusPill: {
     fontSize: '11px',
@@ -318,10 +459,15 @@ const styles = {
     color: '#fff',
     fontWeight: 600,
   },
+  timeLabel: {
+    fontSize: '10px',
+    color: '#6b7280',
+  },
   emptyHint: {
     color: '#6b7280',
     textAlign: 'center',
     padding: '20px 12px',
+    margin: 0,
   },
   main: {
     flex: 1,
