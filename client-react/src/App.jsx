@@ -1,122 +1,94 @@
 import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import ChatWidget from './components/ChatWidget'
+import AgentDashboard from './components/AgentDashboard'
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [view, setView] = useState('customer')
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <div style={styles.root}>
+      <nav style={styles.nav}>
+        <span style={styles.brand}>AeroReply</span>
+        <div style={styles.tabs}>
+          <button
+            style={{
+              ...styles.tab,
+              ...(view === 'customer' ? styles.tabActive : {}),
+            }}
+            onClick={() => setView('customer')}
+          >
+            Customer Chat
+          </button>
+          <button
+            style={{
+              ...styles.tab,
+              ...(view === 'agent' ? styles.tabActive : {}),
+            }}
+            onClick={() => setView('agent')}
+          >
+            Agent Dashboard
+          </button>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+      </nav>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+      <div style={styles.content}>
+        {view === 'customer' ? <ChatWidget /> : <AgentDashboard />}
+      </div>
+    </div>
   )
 }
 
-export default App
+const styles = {
+  root: {
+    minHeight: '100vh',
+    background: '#030712',
+    display: 'flex',
+    flexDirection: 'column',
+    fontFamily: 'system-ui, sans-serif',
+    color: '#f9fafb',
+  },
+  nav: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '12px 24px',
+    borderBottom: '1px solid #1f2937',
+    background: '#111827',
+  },
+  brand: {
+    fontWeight: 800,
+    fontSize: '18px',
+    letterSpacing: '-0.5px',
+    color: '#60a5fa',
+  },
+  tabs: {
+    display: 'flex',
+    gap: '4px',
+    background: '#1f2937',
+    borderRadius: '8px',
+    padding: '3px',
+  },
+  tab: {
+    background: 'transparent',
+    border: 'none',
+    color: '#9ca3af',
+    padding: '6px 14px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: 500,
+    transition: 'all 0.15s',
+  },
+  tabActive: {
+    background: '#374151',
+    color: '#f9fafb',
+    fontWeight: 600,
+  },
+  content: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '32px 16px',
+  },
+}
