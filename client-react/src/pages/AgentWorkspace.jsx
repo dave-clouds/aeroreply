@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSocket } from '../context/SocketContext'
 
-export default function AgentDashboard() {
+// The live ticket queue + reply console for human agents. Customer
+// interactions arrive here automatically (via socket events) — there is
+// no separate "simulate a customer" tool inside the dashboard.
+export default function AgentWorkspace() {
   const { socket, connected } = useSocket()
 
   const [tickets, setTickets] = useState([])
@@ -54,14 +57,6 @@ export default function AgentDashboard() {
 
   useEffect(() => {
     if (!socket) return
-
-    socket.emit('agent:join', {})
-
-    function onAgentJoined({ conversationId }) {
-      if (conversationId) {
-        setJoinedConvs((prev) => new Set(prev).add(conversationId))
-      }
-    }
 
     function onHandoffNewTicket({ conversationId, lastMessage, timestamp }) {
       setTickets((prev) => {
@@ -117,13 +112,11 @@ export default function AgentDashboard() {
       }
     }
 
-    socket.on('agent:joined', onAgentJoined)
     socket.on('handoff:new_ticket', onHandoffNewTicket)
     socket.on('agent:customer_message', onAgentCustomerMessage)
     socket.on('ticket:closed', onTicketClosed)
 
     return () => {
-      socket.off('agent:joined', onAgentJoined)
       socket.off('handoff:new_ticket', onHandoffNewTicket)
       socket.off('agent:customer_message', onAgentCustomerMessage)
       socket.off('ticket:closed', onTicketClosed)
@@ -152,6 +145,7 @@ export default function AgentDashboard() {
 
       if (socket && !joinedConvs.has(conversationId)) {
         socket.emit('agent:join', { conversationId })
+        setJoinedConvs((prev) => new Set(prev).add(conversationId))
       }
 
       try {
@@ -217,7 +211,7 @@ export default function AgentDashboard() {
   const activeTicket = tickets.find((t) => t.conversationId === activeConv)
   const isClosed = activeTicket?.status === 'closed'
 
-  function SidebarContent() {
+  function QueueContent() {
     if (fetchState === 'loading') {
       return (
         <div style={styles.feedbackWrap}>
@@ -303,9 +297,9 @@ export default function AgentDashboard() {
 
   return (
     <div style={styles.shell}>
-      <aside style={styles.sidebar}>
-        <div style={styles.sidebarHeader}>
-          <span style={styles.sidebarTitle}>Agent Dashboard</span>
+      <aside style={styles.queueSidebar}>
+        <div style={styles.queueHeader}>
+          <span style={styles.queueTitle}>Ticket Queue</span>
           <div style={styles.headerRight}>
             {fetchState === 'done' && (
               <span style={styles.ticketCount}>{sortedTickets.length}</span>
@@ -318,7 +312,7 @@ export default function AgentDashboard() {
             />
           </div>
         </div>
-        <SidebarContent />
+        <QueueContent />
       </aside>
 
       <main style={styles.main}>
@@ -436,17 +430,14 @@ export default function AgentDashboard() {
 const styles = {
   shell: {
     display: 'flex',
-    width: '900px',
-    height: '620px',
-    border: '1px solid #374151',
-    borderRadius: '12px',
-    overflow: 'hidden',
+    flex: 1,
+    minHeight: 0,
     background: '#111827',
     fontFamily: 'system-ui, sans-serif',
     fontSize: '14px',
     color: '#f9fafb',
   },
-  sidebar: {
+  queueSidebar: {
     width: '280px',
     borderRight: '1px solid #374151',
     display: 'flex',
@@ -454,14 +445,14 @@ const styles = {
     background: '#1f2937',
     flexShrink: 0,
   },
-  sidebarHeader: {
+  queueHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: '14px 16px',
     borderBottom: '1px solid #374151',
   },
-  sidebarTitle: {
+  queueTitle: {
     fontWeight: 700,
     fontSize: '15px',
   },

@@ -19,9 +19,40 @@ function buildHistoryPayload(messages) {
   }));
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function registerSocketHandlers(io) {
+  // In-memory presence tracking (per-process; fine for a single gateway instance)
+  const agentSockets = new Set();
+  const visitorSockets = new Set();
+
+  function broadcastAgentStatus() {
+    io.emit('agent:status', { online: agentSockets.size > 0 });
+  }
+
+  function broadcastVisitorCount() {
+    io.emit('visitors:count', { count: visitorSockets.size });
+  }
+
   io.on('connection', (socket) => {
     console.log(`[Socket] Client connected — ID: ${socket.id}`);
+
+    // Every new connection is assumed to be a customer/visitor until it
+    // identifies itself as an agent via agent:join.
+    visitorSockets.add(socket.id);
+    broadcastVisitorCount();
+
+    // Tell the newly-connected client the current human-agent availability
+    // so the widget can decide whether to show the live chat or the
+    // AI fallback / lead-capture frame.
+    socket.emit('agent:status', { online: agentSockets.size > 0 });
+
+    // Widgets that mount after the initial connection (e.g. a floating
+    // launcher opened later) can miss the one-shot emit above — let them
+    // explicitly ask for the current status instead of relying on timing.
+    socket.on('agent:status:request', () => {
+      socket.emit('agent:status', { online: agentSockets.size > 0 });
+    });
 
     // ---------------------------------------------------------------
     // Customer sends a new message
@@ -115,7 +146,46 @@ function registerSocketHandlers(io) {
         console.log(`[Socket] Agent joined dashboard`);
       }
 
+      // An agent socket is not a customer/visitor — reclassify it and
+      // mark the human agent as online.
+      if (visitorSockets.delete(socket.id)) {
+        broadcastVisitorCount();
+      }
+      if (!agentSockets.has(socket.id)) {
+        agentSockets.add(socket.id);
+        broadcastAgentStatus();
+      }
+
       socket.emit('agent:joined', { conversationId: conversationId || null });
+    });
+
+    // ---------------------------------------------------------------
+    // Lead capture: visitor leaves an email while no agent is online
+    // ---------------------------------------------------------------
+    socket.on('lead:capture_email', async (data) => {
+      const { conversationId, email } = data || {};
+
+      if (!conversationId || !email || !EMAIL_RE.test(String(email).trim())) {
+        socket.emit('error:invalid', { error: 'A valid conversationId and email are required.' });
+        return;
+      }
+
+      try {
+        const ticket = await Ticket.findOneAndUpdate(
+          { conversationId },
+          {
+            $setOnInsert: { conversationId, customerSocketId: socket.id },
+            $set: { 'metadata.email': String(email).trim() },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+
+        console.log(`[Socket] Lead captured | conv=${conversationId} | email set`);
+        socket.emit('lead:captured', { conversationId, email: ticket.metadata.get('email') });
+      } catch (err) {
+        console.error(`[Socket] Error capturing lead email — ${err.message}`);
+        socket.emit('error:server', { error: 'Failed to save your email. Please try again.' });
+      }
     });
 
     // ---------------------------------------------------------------
@@ -171,6 +241,13 @@ function registerSocketHandlers(io) {
     // ---------------------------------------------------------------
     socket.on('disconnect', () => {
       console.log(`[Socket] Client disconnected — ID: ${socket.id}`);
+
+      if (visitorSockets.delete(socket.id)) {
+        broadcastVisitorCount();
+      }
+      if (agentSockets.delete(socket.id)) {
+        broadcastAgentStatus();
+      }
     });
   });
 }

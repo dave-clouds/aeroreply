@@ -1,38 +1,33 @@
 import { useState } from 'react'
+import { MessageSquare, X } from 'lucide-react'
 import ChatWidget from './components/ChatWidget'
-import AgentDashboard from './components/AgentDashboard'
+import AgentDashboard from './pages/AgentDashboard'
 
+// The business console is the main app. The ChatWidget is the embeddable
+// customer-facing surface — here it floats over the console the same way
+// it would float over any external site once embedded, rather than living
+// behind a top-level navigation tab.
 export default function App() {
-  const [view, setView] = useState('customer')
+  const [widgetOpen, setWidgetOpen] = useState(false)
 
   return (
     <div style={styles.root}>
-      <nav style={styles.nav}>
-        <span style={styles.brand}>AeroReply</span>
-        <div style={styles.tabs}>
-          <button
-            style={{
-              ...styles.tab,
-              ...(view === 'customer' ? styles.tabActive : {}),
-            }}
-            onClick={() => setView('customer')}
-          >
-            Customer Chat
-          </button>
-          <button
-            style={{
-              ...styles.tab,
-              ...(view === 'agent' ? styles.tabActive : {}),
-            }}
-            onClick={() => setView('agent')}
-          >
-            Agent Dashboard
-          </button>
-        </div>
-      </nav>
+      <AgentDashboard />
 
-      <div style={styles.content}>
-        {view === 'customer' ? <ChatWidget /> : <AgentDashboard />}
+      <div style={styles.floatingArea}>
+        {widgetOpen && (
+          <div style={styles.floatingWidget}>
+            <ChatWidget />
+          </div>
+        )}
+        <button
+          type="button"
+          style={styles.launcher}
+          onClick={() => setWidgetOpen((v) => !v)}
+          aria-label={widgetOpen ? 'Close chat widget preview' : 'Open chat widget preview'}
+        >
+          {widgetOpen ? <X size={22} /> : <MessageSquare size={22} />}
+        </button>
       </div>
     </div>
   )
@@ -41,54 +36,32 @@ export default function App() {
 const styles = {
   root: {
     minHeight: '100vh',
-    background: '#030712',
+  },
+  floatingArea: {
+    position: 'fixed',
+    right: '24px',
+    bottom: '24px',
     display: 'flex',
     flexDirection: 'column',
-    fontFamily: 'system-ui, sans-serif',
-    color: '#f9fafb',
+    alignItems: 'flex-end',
+    gap: '14px',
+    zIndex: 50,
   },
-  nav: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '12px 24px',
-    borderBottom: '1px solid #1f2937',
-    background: '#111827',
+  floatingWidget: {
+    boxShadow: '0 12px 32px rgba(0,0,0,0.45)',
+    borderRadius: '12px',
   },
-  brand: {
-    fontWeight: 800,
-    fontSize: '18px',
-    letterSpacing: '-0.5px',
-    color: '#60a5fa',
-  },
-  tabs: {
-    display: 'flex',
-    gap: '4px',
-    background: '#1f2937',
-    borderRadius: '8px',
-    padding: '3px',
-  },
-  tab: {
-    background: 'transparent',
+  launcher: {
+    width: '52px',
+    height: '52px',
+    borderRadius: '50%',
     border: 'none',
-    color: '#9ca3af',
-    padding: '6px 14px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '13px',
-    fontWeight: 500,
-    transition: 'all 0.15s',
-  },
-  tabActive: {
-    background: '#374151',
-    color: '#f9fafb',
-    fontWeight: 600,
-  },
-  content: {
-    flex: 1,
+    background: '#3b82f6',
+    color: '#fff',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '32px 16px',
+    cursor: 'pointer',
+    boxShadow: '0 8px 20px rgba(59,130,246,0.45)',
   },
 }

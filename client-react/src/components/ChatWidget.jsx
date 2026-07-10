@@ -6,6 +6,7 @@ function generateConversationId() {
 }
 
 const CONVERSATION_KEY = 'aeroreply_conversation_id'
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 function getOrCreateConversationId() {
   let id = sessionStorage.getItem(CONVERSATION_KEY)
@@ -16,6 +17,10 @@ function getOrCreateConversationId() {
   return id
 }
 
+// Human-First with AI Fallback / Lead Capture:
+// - If a human agent is online, the visitor gets the normal live chat.
+// - If no agent is online, the widget skips straight to a lead-capture
+//   frame so no potential customer is lost.
 export default function ChatWidget() {
   const { socket, connected } = useSocket()
   const [conversationId] = useState(getOrCreateConversationId)
@@ -23,10 +28,21 @@ export default function ChatWidget() {
   const [input, setInput] = useState('')
   const [status, setStatus] = useState('open')
   const [serverError, setServerError] = useState(null)
+
+  // null = not yet known, true/false once the server tells us
+  const [agentOnline, setAgentOnline] = useState(null)
+  const [leadEmail, setLeadEmail] = useState('')
+  const [leadSubmitted, setLeadSubmitted] = useState(false)
+  const [leadError, setLeadError] = useState(null)
+
   const bottomRef = useRef(null)
 
   useEffect(() => {
     if (!socket) return
+
+    function onAgentStatus({ online }) {
+      setAgentOnline(online)
+    }
 
     function onAgentReply({ reply, sender, timestamp }) {
       setMessages((prev) => [
@@ -46,24 +62,40 @@ export default function ChatWidget() {
 
     function onErrorServer({ error }) {
       setServerError(error)
+      setLeadError(error)
     }
 
     function onErrorInvalid({ error }) {
       setServerError(error)
+      setLeadError(error)
     }
 
+    function onLeadCaptured() {
+      setLeadSubmitted(true)
+      setLeadError(null)
+    }
+
+    socket.on('agent:status', onAgentStatus)
     socket.on('agent:reply', onAgentReply)
     socket.on('handoff:triggered', onHandoffTriggered)
     socket.on('ticket:closed', onTicketClosed)
     socket.on('error:server', onErrorServer)
     socket.on('error:invalid', onErrorInvalid)
+    socket.on('lead:captured', onLeadCaptured)
+
+    // Ask for the current status explicitly — the widget may mount after
+    // the server's one-shot emit on connection has already fired (e.g. a
+    // floating launcher opened well after the socket first connected).
+    socket.emit('agent:status:request')
 
     return () => {
+      socket.off('agent:status', onAgentStatus)
       socket.off('agent:reply', onAgentReply)
       socket.off('handoff:triggered', onHandoffTriggered)
       socket.off('ticket:closed', onTicketClosed)
       socket.off('error:server', onErrorServer)
       socket.off('error:invalid', onErrorInvalid)
+      socket.off('lead:captured', onLeadCaptured)
     }
   }, [socket])
 
@@ -86,6 +118,17 @@ export default function ChatWidget() {
     socket.emit('customer:message', { conversationId, message: text })
   }
 
+  function submitLeadEmail(e) {
+    e.preventDefault()
+    const email = leadEmail.trim()
+    if (!EMAIL_RE.test(email) || !socket) {
+      setLeadError('Please enter a valid email address.')
+      return
+    }
+    setLeadError(null)
+    socket.emit('lead:capture_email', { conversationId, email })
+  }
+
   const statusLabel = {
     open: connected ? '● Connected' : '○ Connecting…',
     handoff: '⟳ Connecting you to a human agent…',
@@ -98,66 +141,115 @@ export default function ChatWidget() {
     closed: '#6b7280',
   }
 
+  // Still waiting to hear from the server about agent availability.
+  const checkingAvailability = agentOnline === null
+
   return (
     <div style={styles.wrapper}>
       <div style={styles.header}>
         <span style={styles.title}>AeroReply Support</span>
-        <span style={{ ...styles.statusBadge, color: statusColor[status] }}>
-          {statusLabel[status]}
-        </span>
+        {!checkingAvailability && agentOnline === false ? (
+          <span style={{ ...styles.statusBadge, color: '#f59e0b' }}>● Away</span>
+        ) : (
+          <span style={{ ...styles.statusBadge, color: statusColor[status] }}>
+            {statusLabel[status]}
+          </span>
+        )}
       </div>
 
-      <div style={styles.messageList}>
-        {messages.length === 0 && (
-          <p style={styles.emptyHint}>Send a message to start the conversation.</p>
-        )}
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            style={{
-              ...styles.bubble,
-              alignSelf: msg.role === 'customer' ? 'flex-end' : 'flex-start',
-              background:
-                msg.role === 'customer'
-                  ? '#3b82f6'
-                  : msg.role === 'agent'
-                  ? '#10b981'
-                  : '#374151',
-              color: '#fff',
-            }}
-          >
-            <span style={styles.bubbleSender}>
-              {msg.role === 'customer' ? 'You' : msg.role === 'agent' ? 'Agent' : 'AI'}
-            </span>
-            <span>{msg.content}</span>
+      {checkingAvailability && (
+        <div style={styles.fallbackBody}>
+          <p style={styles.fallbackHint}>Checking availability…</p>
+        </div>
+      )}
+
+      {!checkingAvailability && agentOnline === false && (
+        <div style={styles.fallbackBody}>
+          <p style={styles.fallbackMessage}>
+            We're busy at the moment. Sorry about that. Leave us your email, and we
+            will contact you as soon as possible...
+          </p>
+
+          {leadSubmitted ? (
+            <p style={styles.fallbackSuccess}>
+              Thanks! We've saved your email and will reach out shortly.
+            </p>
+          ) : (
+            <form onSubmit={submitLeadEmail} style={styles.leadForm}>
+              <input
+                style={styles.input}
+                type="email"
+                placeholder="you@example.com"
+                value={leadEmail}
+                onChange={(e) => setLeadEmail(e.target.value)}
+                disabled={!connected}
+              />
+              <button
+                style={{ ...styles.sendBtn, opacity: !connected ? 0.5 : 1 }}
+                type="submit"
+                disabled={!connected}
+              >
+                Submit
+              </button>
+            </form>
+          )}
+          {leadError && <div style={styles.errorBubble}>{leadError}</div>}
+        </div>
+      )}
+
+      {!checkingAvailability && agentOnline === true && (
+        <>
+          <div style={styles.messageList}>
+            {messages.length === 0 && (
+              <p style={styles.emptyHint}>Send a message to start the conversation.</p>
+            )}
+            {messages.map((msg, i) => (
+              <div
+                key={i}
+                style={{
+                  ...styles.bubble,
+                  alignSelf: msg.role === 'customer' ? 'flex-end' : 'flex-start',
+                  background:
+                    msg.role === 'customer'
+                      ? '#3b82f6'
+                      : msg.role === 'agent'
+                      ? '#10b981'
+                      : '#374151',
+                  color: '#fff',
+                }}
+              >
+                <span style={styles.bubbleSender}>
+                  {msg.role === 'customer' ? 'You' : msg.role === 'agent' ? 'Agent' : 'AI'}
+                </span>
+                <span>{msg.content}</span>
+              </div>
+            ))}
+            {serverError && <div style={styles.errorBubble}>{serverError}</div>}
+            <div ref={bottomRef} />
           </div>
-        ))}
-        {serverError && (
-          <div style={styles.errorBubble}>{serverError}</div>
-        )}
-        <div ref={bottomRef} />
-      </div>
 
-      <form onSubmit={sendMessage} style={styles.form}>
-        <input
-          style={styles.input}
-          type="text"
-          placeholder={status === 'closed' ? 'Conversation closed.' : 'Type a message…'}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={status === 'closed' || !connected}
-        />
-        <button
-          style={{
-            ...styles.sendBtn,
-            opacity: status === 'closed' || !connected ? 0.5 : 1,
-          }}
-          type="submit"
-          disabled={status === 'closed' || !connected}
-        >
-          Send
-        </button>
-      </form>
+          <form onSubmit={sendMessage} style={styles.form}>
+            <input
+              style={styles.input}
+              type="text"
+              placeholder={status === 'closed' ? 'Conversation closed.' : 'Type a message…'}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={status === 'closed' || !connected}
+            />
+            <button
+              style={{
+                ...styles.sendBtn,
+                opacity: status === 'closed' || !connected ? 0.5 : 1,
+              }}
+              type="submit"
+              disabled={status === 'closed' || !connected}
+            >
+              Send
+            </button>
+          </form>
+        </>
+      )}
     </div>
   )
 }
@@ -190,6 +282,33 @@ const styles = {
   },
   statusBadge: {
     fontSize: '12px',
+  },
+  fallbackBody: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    gap: '14px',
+    padding: '24px 20px',
+  },
+  fallbackHint: {
+    color: '#6b7280',
+    textAlign: 'center',
+    margin: 0,
+  },
+  fallbackMessage: {
+    margin: 0,
+    lineHeight: 1.6,
+    color: '#d1d5db',
+  },
+  fallbackSuccess: {
+    margin: 0,
+    color: '#4ade80',
+    fontWeight: 600,
+  },
+  leadForm: {
+    display: 'flex',
+    gap: '8px',
   },
   messageList: {
     flex: 1,
