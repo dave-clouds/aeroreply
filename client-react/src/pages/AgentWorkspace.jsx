@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowLeft } from 'lucide-react'
 import { useSocket } from '../context/SocketContext'
 
 // The live ticket queue + reply console for human agents. Customer
@@ -296,8 +297,13 @@ export default function AgentWorkspace() {
   }
 
   return (
-    <div style={styles.shell}>
-      <aside style={styles.queueSidebar}>
+    <div
+      className={`aw-shell ${activeConv ? 'aw-has-active' : ''}`}
+      style={styles.shell}
+    >
+      <style>{RESPONSIVE_CSS}</style>
+
+      <aside className="aw-queue" style={styles.queueSidebar}>
         <div style={styles.queueHeader}>
           <span style={styles.queueTitle}>Ticket Queue</span>
           <div style={styles.headerRight}>
@@ -315,12 +321,21 @@ export default function AgentWorkspace() {
         <QueueContent />
       </aside>
 
-      <main style={styles.main}>
+      <main className="aw-main" style={styles.main}>
         {!activeConv ? (
           <div style={styles.placeholder}>Select a ticket to start responding.</div>
         ) : (
           <>
             <div style={styles.convHeader}>
+              <button
+                type="button"
+                className="aw-back-btn"
+                style={styles.backBtn}
+                onClick={() => setActiveConv(null)}
+              >
+                <ArrowLeft size={15} />
+                Back to Tickets
+              </button>
               <div style={styles.convMeta}>
                 <span style={styles.convId}>{activeConv}</span>
                 {historyState === 'loading' && (
@@ -426,6 +441,19 @@ export default function AgentWorkspace() {
     </div>
   )
 }
+
+const RESPONSIVE_CSS = `
+  .aw-back-btn { display: none; }
+
+  @media (max-width: 860px) {
+    .aw-queue, .aw-main { width: 100%; }
+
+    .aw-shell.aw-has-active .aw-queue { display: none; }
+    .aw-shell:not(.aw-has-active) .aw-main { display: none; }
+
+    .aw-back-btn { display: flex !important; }
+  }
+`
 
 const styles = {
   shell: {
@@ -599,6 +627,20 @@ const styles = {
     borderTop: '1.5px solid #60a5fa',
     borderRadius: '50%',
     animation: 'spin 0.8s linear infinite',
+    flexShrink: 0,
+  },
+  backBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    background: '#374151',
+    color: '#f9fafb',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '7px 12px',
+    fontSize: '12.5px',
+    fontWeight: 700,
+    cursor: 'pointer',
     flexShrink: 0,
   },
   closeBtn: {
