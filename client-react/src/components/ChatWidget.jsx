@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Maximize2, Minimize2, Minus, X } from 'lucide-react'
 import { useSocket } from '../context/SocketContext'
 
 function generateConversationId() {
@@ -34,6 +35,11 @@ export default function ChatWidget() {
   const [leadEmail, setLeadEmail] = useState('')
   const [leadSubmitted, setLeadSubmitted] = useState(false)
   const [leadError, setLeadError] = useState(null)
+
+  // Widget frame controls — purely presentational, do not touch socket
+  // state or any conversation/lead logic below.
+  const [size, setSize] = useState('normal') // 'normal' | 'maximized' | 'minimized'
+  const [hidden, setHidden] = useState(false)
 
   const bottomRef = useRef(null)
 
@@ -144,26 +150,70 @@ export default function ChatWidget() {
   // Still waiting to hear from the server about agent availability.
   const checkingAvailability = agentOnline === null
 
+  if (hidden) return null
+
+  const isMaximized = size === 'maximized'
+  const isMinimized = size === 'minimized'
+
   return (
-    <div style={styles.wrapper}>
+    <div
+      style={{
+        ...styles.wrapper,
+        ...(isMaximized ? styles.wrapperMaximized : {}),
+        ...(isMinimized ? styles.wrapperMinimized : {}),
+      }}
+    >
       <div style={styles.header}>
         <span style={styles.title}>AeroReply Support</span>
-        {!checkingAvailability && agentOnline === false ? (
-          <span style={{ ...styles.statusBadge, color: '#f59e0b' }}>● Away</span>
-        ) : (
-          <span style={{ ...styles.statusBadge, color: statusColor[status] }}>
-            {statusLabel[status]}
-          </span>
-        )}
+
+        <div style={styles.headerRight}>
+          {!checkingAvailability && agentOnline === false ? (
+            <span style={{ ...styles.statusBadge, color: '#f59e0b' }}>● Away</span>
+          ) : (
+            <span style={{ ...styles.statusBadge, color: statusColor[status] }}>
+              {statusLabel[status]}
+            </span>
+          )}
+
+          <div style={styles.headerControls}>
+            <button
+              type="button"
+              style={styles.controlBtn}
+              onClick={() => setSize((s) => (s === 'maximized' ? 'normal' : 'maximized'))}
+              aria-label={isMaximized ? 'Restore chat window' : 'Maximize chat window'}
+              title={isMaximized ? 'Restore' : 'Maximize'}
+            >
+              {isMaximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            </button>
+            <button
+              type="button"
+              style={styles.controlBtn}
+              onClick={() => setSize((s) => (s === 'minimized' ? 'normal' : 'minimized'))}
+              aria-label={isMinimized ? 'Restore chat window' : 'Minimize chat window'}
+              title={isMinimized ? 'Restore' : 'Minimize'}
+            >
+              <Minus size={15} />
+            </button>
+            <button
+              type="button"
+              style={styles.controlBtn}
+              onClick={() => setHidden(true)}
+              aria-label="Close chat widget"
+              title="Close"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
       </div>
 
-      {checkingAvailability && (
+      {!isMinimized && checkingAvailability && (
         <div style={styles.fallbackBody}>
           <p style={styles.fallbackHint}>Checking availability…</p>
         </div>
       )}
 
-      {!checkingAvailability && agentOnline === false && (
+      {!isMinimized && !checkingAvailability && agentOnline === false && (
         <div style={styles.fallbackBody}>
           <p style={styles.fallbackMessage}>
             We're busy at the moment. Sorry about that. Leave us your email, and we
@@ -197,7 +247,7 @@ export default function ChatWidget() {
         </div>
       )}
 
-      {!checkingAvailability && agentOnline === true && (
+      {!isMinimized && !checkingAvailability && agentOnline === true && (
         <>
           <div style={styles.messageList}>
             {messages.length === 0 && (
@@ -260,25 +310,59 @@ const styles = {
     flexDirection: 'column',
     width: '420px',
     height: '600px',
-    border: '1px solid #374151',
-    borderRadius: '12px',
+    border: '1px solid #2d3648',
+    borderRadius: '18px',
     overflow: 'hidden',
-    background: '#111827',
+    background: 'linear-gradient(180deg, #131a2a 0%, #0e1420 100%)',
     fontFamily: 'system-ui, sans-serif',
     fontSize: '14px',
     color: '#f9fafb',
+    boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+    transition: 'width 0.2s ease, height 0.2s ease',
+  },
+  wrapperMaximized: {
+    width: 'min(92vw, 720px)',
+    height: 'min(88vh, 820px)',
+  },
+  wrapperMinimized: {
+    height: 'auto',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: '12px 16px',
-    background: '#1f2937',
-    borderBottom: '1px solid #374151',
+    padding: '14px 16px',
+    background: 'linear-gradient(135deg, #1e293b 0%, #172033 100%)',
+    borderBottom: '1px solid #2d3648',
   },
   title: {
     fontWeight: 700,
     fontSize: '15px',
+    letterSpacing: '-0.2px',
+  },
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  headerControls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    paddingLeft: '10px',
+    borderLeft: '1px solid #374151',
+  },
+  controlBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '26px',
+    height: '26px',
+    border: 'none',
+    borderRadius: '7px',
+    background: 'transparent',
+    color: '#9ca3af',
+    cursor: 'pointer',
   },
   statusBadge: {
     fontSize: '12px',

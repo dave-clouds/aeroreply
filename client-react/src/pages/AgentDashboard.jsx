@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Home, MessageSquare, Users, Settings as SettingsIcon } from 'lucide-react'
+import { Home, MessageSquare, Users, Settings as SettingsIcon, Menu, X } from 'lucide-react'
 import { useSocket } from '../context/SocketContext'
 import AeroHub from './AeroHub'
 import AgentWorkspace from './AgentWorkspace'
@@ -13,11 +13,13 @@ const NAV_ITEMS = [
   { key: 'settings', label: 'Settings Panel', icon: SettingsIcon, view: Settings },
 ]
 
-// The business console shell: a vertical left-hand sidebar (nav clustered
-// toward the bottom of the column) plus a content area for the active page.
+// The business console shell: a toggleable left-hand sidebar with the nav
+// items grouped at the top. On mobile it's hidden by default and slides in
+// from a fixed hamburger toggle; on desktop it's always visible.
 export default function AgentDashboard() {
   const { socket, connected } = useSocket()
   const [active, setActive] = useState('hub')
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   // Being inside the dashboard app marks this session as a human agent —
   // this is what powers the "human agent online" check the ChatWidget uses.
@@ -28,9 +30,37 @@ export default function AgentDashboard() {
 
   const ActiveView = NAV_ITEMS.find((i) => i.key === active)?.view ?? AeroHub
 
+  function selectNav(key) {
+    setActive(key)
+    setIsSidebarOpen(false)
+  }
+
   return (
     <div style={styles.shell}>
-      <aside style={styles.sidebar}>
+      <style>{RESPONSIVE_CSS}</style>
+
+      <button
+        type="button"
+        className="ard-hamburger"
+        style={styles.hamburger}
+        onClick={() => setIsSidebarOpen((v) => !v)}
+        aria-label={isSidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
+      >
+        {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
+      </button>
+
+      {isSidebarOpen && (
+        <div
+          className="ard-overlay"
+          style={styles.overlay}
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`ard-sidebar ${isSidebarOpen ? 'ard-sidebar-open' : ''}`}
+        style={styles.sidebar}
+      >
         <div style={styles.brandBlock}>
           <span style={styles.brand}>AeroReply</span>
           <span
@@ -42,14 +72,12 @@ export default function AgentDashboard() {
           />
         </div>
 
-        <div style={styles.spacer} />
-
         <nav style={styles.nav}>
           {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
               type="button"
-              onClick={() => setActive(key)}
+              onClick={() => selectNav(key)}
               style={{
                 ...styles.navItem,
                 ...(active === key ? styles.navItemActive : {}),
@@ -60,14 +88,42 @@ export default function AgentDashboard() {
             </button>
           ))}
         </nav>
+
+        <div style={styles.spacer} />
       </aside>
 
-      <div style={styles.content}>
+      <div className="ard-content" style={styles.content}>
         <ActiveView />
       </div>
     </div>
   )
 }
+
+const RESPONSIVE_CSS = `
+  .ard-hamburger { display: none; }
+
+  @media (max-width: 860px) {
+    .ard-hamburger { display: flex !important; }
+    .ard-sidebar {
+      position: fixed !important;
+      top: 0;
+      left: 0;
+      height: 100vh;
+      transform: translateX(-100%);
+      transition: transform 0.25s ease;
+      z-index: 60;
+      box-shadow: 0 0 0 rgba(0,0,0,0);
+    }
+    .ard-sidebar-open {
+      transform: translateX(0);
+      box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+    }
+    .ard-content {
+      width: 100%;
+      padding-top: 56px;
+    }
+  }
+`
 
 const styles = {
   shell: {
@@ -77,6 +133,28 @@ const styles = {
     background: '#0b0f19',
     fontFamily: 'system-ui, sans-serif',
     color: '#f9fafb',
+  },
+  hamburger: {
+    position: 'fixed',
+    top: '14px',
+    left: '14px',
+    zIndex: 70,
+    width: '40px',
+    height: '40px',
+    borderRadius: '10px',
+    border: '1px solid #1f2937',
+    background: '#111827',
+    color: '#f9fafb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+  },
+  overlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.5)',
+    zIndex: 55,
   },
   sidebar: {
     width: '232px',
@@ -92,6 +170,7 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '0 6px',
+    marginBottom: '18px',
   },
   brand: {
     fontWeight: 800,
