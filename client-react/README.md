@@ -1,8 +1,9 @@
-# AeroReply — client-react
+# AeroReply - Agent Dashboard & Landing Page
 
 The React + Vite frontend for AeroReply, an AI-powered customer support platform. This
-package contains both the public marketing site and the internal Agent Dashboard, plus
-the embeddable customer-facing chat widget.
+folder houses three things in one app: the customer-facing **Landing Page**, the
+interactive **ChatWidget** demo embedded on it, and the internal **Agent Workspace /
+AeroHub Dashboard** used by support agents.
 
 It talks to the `gateway-node` service over REST (`/api/...`) and Socket.io
 (`/socket.io`), both proxied through Vite in development. The gateway is what actually
@@ -19,13 +20,14 @@ src/
 │   └── SocketContext.jsx      # Shared Socket.io client + connection state
 ├── components/
 │   └── ChatWidget.jsx         # Customer-facing chat widget — human-first with
-│                              # AI fallback/lead-capture. NOT rendered inside the
-│                              # dashboard; it's demoed on the landing page and
-│                              # shipped separately via the embed snippet on the
-│                              # Settings Panel.
+│                              # AI fallback/lead-capture. Demoed live on the
+│                              # landing page, and also shipped separately via
+│                              # the embed snippet on the Settings Panel.
+├── assets/
+│   └── hero.png               # Hero graphic used on the landing page
 └── pages/
     ├── LandingPage.jsx        # Public marketing page: navbar, hero, feature
-    │                          # pillars, and a live ChatWidget demo.
+    │                          # pillars, and the live ChatWidget demo.
     ├── AgentDashboard.jsx     # Dashboard shell — responsive sidebar (hamburger
     │                          # on mobile) + view switching between the pages below.
     ├── AeroHub.jsx            # Dashboard home — ticket stats, gateway status.
@@ -37,28 +39,29 @@ src/
 ## Running locally
 
 This package is one of three services that make up AeroReply; the dashboard and chat
-widget only work end-to-end when all three are running:
+widget only work end-to-end when all three are running.
 
 ```bash
 # from client-react/
-npm install
-npm run dev       # serves on port 5000, proxies /api and /socket.io to the gateway
+npm install        # install dependencies
+npm run dev         # serves on port 5000, proxies /api and /socket.io to the gateway
+npm run build        # production build, output written to dist/
 ```
 
-On Replit, this is already wired up as the `Start application` workflow. The
+On Replit, `npm run dev` is already wired up as the `Start application` workflow. The
 companion `Gateway` (`gateway-node`, port 3001) and `AI Service` (`ai-python`, port
-8000) workflows must also be running.
+8000) workflows must also be running for the dashboard and chat widget to function.
 
 Other scripts:
-- `npm run build` — production build (`dist/`)
 - `npm run lint` — ESLint
 - `npm run preview` — preview a production build locally
 
-## Routing note
+## Current Status
 
 There is currently no routing library installed. `App.jsx` holds a single `view`
-state (`'landing' | 'dashboard'`) and swaps between `LandingPage` and
-`AgentDashboard` directly; `AgentDashboard` itself uses its own local state to switch
-between AeroHub / Agent Workspace / Live Visitors / Settings. This is a deliberate
-placeholder — the next phase replaces both of these with real React Router routes
-(e.g. `/`, `/dashboard`, `/dashboard/workspace`, ...) so views are addressable by URL.
+state (`'landing' | 'dashboard'`) and swaps directly between `LandingPage` and
+`AgentDashboard`; `AgentDashboard` itself uses its own local state to switch between
+AeroHub / Agent Workspace / Live Visitors / Settings. This is a deliberate,
+temporary approach — it will be replaced with real React Router routes once
+authentication is implemented, so views become addressable by URL and protected
+routes (e.g. the dashboard) can gate on login state.
