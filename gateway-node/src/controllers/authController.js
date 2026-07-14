@@ -57,4 +57,20 @@ async function loginUser(req, res, next) {
   }
 }
 
-module.exports = { generateToken, registerUser, loginUser };
+// GET /api/auth/me
+async function getMe(req, res, next) {
+  try {
+    // req.user is already loaded (minus password) by the `protect` middleware.
+    res.status(200).json({
+      _id: req.user._id,
+      name: req.user.name,
+      email: req.user.email,
+      projectId: req.user.projectId,
+      role: req.user.role,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { generateToken, registerUser, loginUser, getMe };
