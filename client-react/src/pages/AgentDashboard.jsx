@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Home, MessageSquare, Users, Settings as SettingsIcon, Menu, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Home, MessageSquare, Users, Settings as SettingsIcon, Menu, X, LogOut } from 'lucide-react'
 import { useSocket } from '../context/SocketContext'
+import { useAuth } from '../context/AuthContext'
 import AeroHub from './AeroHub'
 import AgentWorkspace from './AgentWorkspace'
 import LiveVisitors from './LiveVisitors'
@@ -18,6 +20,8 @@ const NAV_ITEMS = [
 // from a fixed hamburger toggle; on desktop it's always visible.
 export default function AgentDashboard() {
   const { socket, connected } = useSocket()
+  const { logout } = useAuth()
+  const navigate = useNavigate()
   const [active, setActive] = useState('hub')
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
@@ -33,6 +37,11 @@ export default function AgentDashboard() {
   function selectNav(key) {
     setActive(key)
     setIsSidebarOpen(false)
+  }
+
+  async function handleLogout() {
+    await logout()
+    navigate('/login')
   }
 
   return (
@@ -90,6 +99,15 @@ export default function AgentDashboard() {
         </nav>
 
         <div style={styles.spacer} />
+
+        <button
+          type="button"
+          onClick={handleLogout}
+          style={styles.logoutButton}
+        >
+          <LogOut size={18} strokeWidth={2} />
+          <span>Log out</span>
+        </button>
       </aside>
 
       <div className="ard-content" style={styles.content}>
@@ -211,6 +229,21 @@ const styles = {
     background: '#1f2937',
     color: '#f9fafb',
     fontWeight: 600,
+  },
+  logoutButton: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '10px 12px',
+    background: 'transparent',
+    border: '1px solid #1f2937',
+    borderRadius: '8px',
+    color: '#f87171',
+    fontSize: '13.5px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    textAlign: 'left',
+    fontFamily: 'inherit',
   },
   content: {
     flex: 1,

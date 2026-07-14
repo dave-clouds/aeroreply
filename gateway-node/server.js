@@ -4,9 +4,11 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const mongoose = require('mongoose');
 
+const { connectDB } = require('./config/db');
 const { registerSocketHandlers } = require('./socketHandlers');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 const Ticket = require('./models/Ticket');
+const authRoutes = require('./src/routes/authRoutes');
 
 // ---------------------------------------------------------------------------
 // App bootstrap
@@ -19,33 +21,24 @@ app.use(express.json());
 // ---------------------------------------------------------------------------
 // MongoDB connection
 // ---------------------------------------------------------------------------
-const MONGODB_URI = process.env.MONGODB_URI;
-
 let dbConnected = false;
 
-if (MONGODB_URI) {
-  mongoose
-    .connect(MONGODB_URI)
-    .then(() => {
-      dbConnected = true;
-      console.log('[DB] MongoDB connected successfully');
-    })
-    .catch((err) => {
-      console.warn(`[DB] MongoDB connection failed: ${err.message}`);
-      console.warn('[DB] Running in DB-less mode — ticket persistence disabled');
-    });
-
-  mongoose.connection.on('disconnected', () => {
-    dbConnected = false;
-    console.warn('[DB] MongoDB disconnected');
-  });
-  mongoose.connection.on('reconnected', () => {
+connectDB()
+  .then(() => {
     dbConnected = true;
-    console.log('[DB] MongoDB reconnected');
+  })
+  .catch((err) => {
+    console.warn(`[DB] Running in DB-less mode — ticket/auth persistence disabled (${err.message})`);
   });
-} else {
-  console.warn('[DB] MONGODB_URI not set — running in DB-less mode (ticket persistence disabled)');
-}
+
+mongoose.connection.on('disconnected', () => {
+  dbConnected = false;
+  console.warn('[DB] MongoDB disconnected');
+});
+mongoose.connection.on('reconnected', () => {
+  dbConnected = true;
+  console.log('[DB] MongoDB reconnected');
+});
 
 // ---------------------------------------------------------------------------
 // HTTP server + Socket.io
@@ -63,6 +56,8 @@ registerSocketHandlers(io);
 // ---------------------------------------------------------------------------
 // REST routes
 // ---------------------------------------------------------------------------
+
+app.use('/api/auth', authRoutes);
 
 app.get('/health', (req, res) => {
   res.json({

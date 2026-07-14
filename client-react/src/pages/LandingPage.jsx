@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Bot, LayoutDashboard, Users2, ArrowRight, Menu, X as CloseIcon } from 'lucide-react'
 import ChatWidget from '../components/ChatWidget'
 import heroImage from '../assets/hero.png'
@@ -58,6 +59,9 @@ export default function LandingPage({ onGoToDashboard }) {
           </nav>
 
           <div className="lp-nav-cta" style={styles.navCtaWrap}>
+            <Link to="/login" style={styles.navLoginLink}>
+              Log in
+            </Link>
             <button type="button" style={styles.ctaButtonSmall} onClick={onGoToDashboard}>
               Go to Dashboard
             </button>
@@ -86,6 +90,13 @@ export default function LandingPage({ onGoToDashboard }) {
                 {link.label}
               </a>
             ))}
+            <Link
+              to="/login"
+              style={styles.mobileMenuLink}
+              onClick={() => setMobileNavOpen(false)}
+            >
+              Log in
+            </Link>
             <button
               type="button"
               style={styles.ctaButtonFull}
@@ -249,6 +260,14 @@ const styles = {
   },
   navCtaWrap: {
     display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+  },
+  navLoginLink: {
+    color: '#d1d5db',
+    textDecoration: 'none',
+    fontSize: '14px',
+    fontWeight: 600,
   },
   navToggle: {
     alignItems: 'center',
