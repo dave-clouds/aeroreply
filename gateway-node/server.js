@@ -7,6 +7,7 @@ const mongoose = require('mongoose');
 const { registerSocketHandlers } = require('./socketHandlers');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 const Ticket = require('./models/Ticket');
+const authRoutes = require('./src/routes/authRoutes');
 
 // ---------------------------------------------------------------------------
 // App bootstrap
@@ -63,6 +64,8 @@ registerSocketHandlers(io);
 // ---------------------------------------------------------------------------
 // REST routes
 // ---------------------------------------------------------------------------
+
+app.use('/api/auth', authRoutes);
 
 app.get('/health', (req, res) => {
   res.json({

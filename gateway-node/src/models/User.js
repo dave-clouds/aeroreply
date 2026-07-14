@@ -35,17 +35,14 @@ const UserSchema = new mongoose.Schema(
 );
 
 // Hash the password before saving, but only when it's new or has changed.
-UserSchema.pre('save', async function (next) {
+// Mongoose treats an `async` pre-save hook as promise-based middleware — it
+// does not pass a `next` callback, so we just return/throw normally.
+UserSchema.pre('save', async function () {
   if (!this.isModified('password')) {
-    return next();
+    return;
   }
-  try {
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
-    next();
-  } catch (err) {
-    next(err);
-  }
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
 });
 
 // Compares a plaintext password attempt against the stored hash.
