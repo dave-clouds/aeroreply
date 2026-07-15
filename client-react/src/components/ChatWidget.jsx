@@ -18,11 +18,16 @@ function getOrCreateConversationId() {
   return id
 }
 
-// Human-First with AI Fallback / Lead Capture:
-// - If a human agent is online, the visitor gets the normal live chat.
-// - If no agent is online, the widget skips straight to a lead-capture
-//   frame so no potential customer is lost.
-export default function ChatWidget() {
+// Human-First with AI Fallback / Lead Capture, plus a "landing" variant:
+// - variant="embed" (default): the real tenant-facing widget. If a human
+//   agent is online, the visitor gets the normal live chat; if no agent is
+//   online, it falls back to lead capture.
+// - variant="landing": AeroReply's own sales/product AI assistant, shown on
+//   the marketing site. It never checks human availability, never offers
+//   lead capture, and can never escalate to a human — the socket connects
+//   with no projectId, and the gateway enforces this server-side too.
+export default function ChatWidget({ variant = 'embed' }) {
+  const isLanding = variant === 'landing'
   const { socket, connected } = useSocket()
   const [conversationId] = useState(getOrCreateConversationId)
   const [messages, setMessages] = useState([])
@@ -30,8 +35,9 @@ export default function ChatWidget() {
   const [status, setStatus] = useState('open')
   const [serverError, setServerError] = useState(null)
 
-  // null = not yet known, true/false once the server tells us
-  const [agentOnline, setAgentOnline] = useState(null)
+  // null = not yet known, true/false once the server tells us. The landing
+  // variant never waits on this — it renders straight into AI chat mode.
+  const [agentOnline, setAgentOnline] = useState(isLanding ? true : null)
   const [leadEmail, setLeadEmail] = useState('')
   const [leadSubmitted, setLeadSubmitted] = useState(false)
   const [leadError, setLeadError] = useState(null)
@@ -47,6 +53,9 @@ export default function ChatWidget() {
     if (!socket) return
 
     function onAgentStatus({ online }) {
+      // The landing sales-assistant is always in AI chat mode — it never
+      // reflects human-agent presence for the AeroReply team itself.
+      if (isLanding) return
       setAgentOnline(online)
     }
 
@@ -121,7 +130,11 @@ export default function ChatWidget() {
     setInput('')
     setServerError(null)
 
-    socket.emit('customer:message', { conversationId, message: text })
+    socket.emit('customer:message', {
+      conversationId,
+      message: text,
+      ...(isLanding && { mode: 'sales' }),
+    })
   }
 
   function submitLeadEmail(e) {
@@ -164,7 +177,7 @@ export default function ChatWidget() {
       }}
     >
       <div style={styles.header}>
-        <span style={styles.title}>AeroReply Support</span>
+        <span style={styles.title}>{isLanding ? 'AeroReply Assistant' : 'AeroReply Support'}</span>
 
         <div style={styles.headerRight}>
           {!checkingAvailability && agentOnline === false ? (
@@ -251,7 +264,11 @@ export default function ChatWidget() {
         <>
           <div style={styles.messageList}>
             {messages.length === 0 && (
-              <p style={styles.emptyHint}>Send a message to start the conversation.</p>
+              <p style={styles.emptyHint}>
+                {isLanding
+                  ? 'Ask about pricing, features, or how AeroReply fits your team.'
+                  : 'Send a message to start the conversation.'}
+              </p>
             )}
             {messages.map((msg, i) => (
               <div
@@ -282,7 +299,13 @@ export default function ChatWidget() {
             <input
               style={styles.input}
               type="text"
-              placeholder={status === 'closed' ? 'Conversation closed.' : 'Type a message…'}
+              placeholder={
+                status === 'closed'
+                  ? 'Conversation closed.'
+                  : isLanding
+                  ? 'Ask about AeroReply…'
+                  : 'Type a message…'
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={status === 'closed' || !connected}

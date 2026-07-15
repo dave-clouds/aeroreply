@@ -24,6 +24,16 @@ const TicketSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    // Multi-tenant isolation: every ticket belongs to exactly one business
+    // (identified by the owning agent's User.projectId). All ticket queries
+    // must be scoped by this field so agents never see another tenant's
+    // conversations. Landing-page/sales-demo conversations have no tenant
+    // and are never persisted as tickets, so this is always present here.
+    projectId: {
+      type: String,
+      required: true,
+      index: true,
+    },
     customerSocketId: {
       type: String,
     },

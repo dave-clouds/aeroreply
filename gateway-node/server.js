@@ -9,6 +9,7 @@ const { registerSocketHandlers } = require('./socketHandlers');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 const Ticket = require('./models/Ticket');
 const authRoutes = require('./src/routes/authRoutes');
+const { protect } = require('./src/middleware/authMiddleware');
 
 // ---------------------------------------------------------------------------
 // App bootstrap
@@ -68,11 +69,17 @@ app.get('/health', (req, res) => {
   });
 });
 
-// List all tickets (open + handoff by default)
-app.get('/api/tickets', async (req, res, next) => {
+// All ticket routes require an authenticated agent and are strictly scoped
+// to that agent's own tenant (req.user.projectId) — this is the multi-tenant
+// isolation boundary for REST access, mirroring the Socket.io room scoping.
+
+// List all tickets for the caller's project (open + handoff by default)
+app.get('/api/tickets', protect, async (req, res, next) => {
   try {
     const { status } = req.query;
-    const filter = status ? { status } : { status: { $in: ['open', 'handoff'] } };
+    const filter = status
+      ? { projectId: req.user.projectId, status }
+      : { projectId: req.user.projectId, status: { $in: ['open', 'handoff'] } };
     const tickets = await Ticket.find(filter)
       .select('-messages')
       .sort({ updatedAt: -1 })
@@ -83,10 +90,13 @@ app.get('/api/tickets', async (req, res, next) => {
   }
 });
 
-// Get a single ticket with full message history
-app.get('/api/tickets/:conversationId', async (req, res, next) => {
+// Get a single ticket with full message history — scoped to the caller's project
+app.get('/api/tickets/:conversationId', protect, async (req, res, next) => {
   try {
-    const ticket = await Ticket.findOne({ conversationId: req.params.conversationId });
+    const ticket = await Ticket.findOne({
+      conversationId: req.params.conversationId,
+      projectId: req.user.projectId,
+    });
     if (!ticket) {
       const err = new Error('Ticket not found');
       err.status = 404;
@@ -98,8 +108,8 @@ app.get('/api/tickets/:conversationId', async (req, res, next) => {
   }
 });
 
-// Update ticket status (e.g. mark as closed)
-app.patch('/api/tickets/:conversationId/status', async (req, res, next) => {
+// Update ticket status (e.g. mark as closed) — scoped to the caller's project
+app.patch('/api/tickets/:conversationId/status', protect, async (req, res, next) => {
   try {
     const { status } = req.body;
     const allowed = ['open', 'handoff', 'closed'];
@@ -109,7 +119,7 @@ app.patch('/api/tickets/:conversationId/status', async (req, res, next) => {
       return next(err);
     }
     const ticket = await Ticket.findOneAndUpdate(
-      { conversationId: req.params.conversationId },
+      { conversationId: req.params.conversationId, projectId: req.user.projectId },
       { $set: { status } },
       { new: true }
     );

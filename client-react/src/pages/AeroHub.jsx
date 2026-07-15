@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useSocket } from '../context/SocketContext'
+import api from '../services/api'
 
 // AeroHub — the analytics overview / index page of the business console.
+// Tickets are fetched through the shared `api` instance so the JWT is
+// attached automatically — the backend scopes results to this agent's own
+// project, so these stats only ever reflect this tenant's activity.
 export default function AeroHub() {
   const { connected } = useSocket()
   const [tickets, setTickets] = useState([])
@@ -9,17 +13,14 @@ export default function AeroHub() {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetch('/api/tickets', { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error(`Server returned ${res.status}`)
-        return res.json()
-      })
-      .then(({ tickets: fetched }) => {
-        setTickets(fetched)
+    api
+      .get('/tickets', { signal: controller.signal })
+      .then(({ data }) => {
+        setTickets(data.tickets)
         setFetchState('done')
       })
       .catch((err) => {
-        if (err.name === 'AbortError') return
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return
         setFetchState('error')
       })
     return () => controller.abort()

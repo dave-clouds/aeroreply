@@ -1,12 +1,14 @@
 const axios = require('axios');
+const jwt = require('jsonwebtoken');
 const Ticket = require('./models/Ticket');
+const User = require('./src/models/User');
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 
-async function callAIService(message, conversationId, chatHistory) {
+async function callAIService(message, conversationId, chatHistory, mode) {
   const response = await axios.post(
     `${AI_SERVICE_URL}/chat`,
-    { message, conversationId, chatHistory },
+    { message, conversationId, chatHistory, mode },
     { timeout: 10000 }
   );
   return response.data;
@@ -21,90 +23,193 @@ function buildHistoryPayload(messages) {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// ---------------------------------------------------------------------------
+// Multi-tenant identity resolution
+// ---------------------------------------------------------------------------
+// Every socket is classified exactly once, at connection time, based on how
+// it authenticated — never on data the client sends afterwards:
+//
+//   - 'agent'   — a logged-in dashboard user. Identity comes from a verified
+//                 JWT (`socket.handshake.auth.token`); projectId is read from
+//                 the *database* user record, not from the client.
+//   - 'customer' — a visitor on a tenant's site via the embeddable widget.js.
+//                 Identity is the projectId passed in the handshake query
+//                 (`data-aeroreply-project-id` on the widget's <script> tag).
+//   - 'landing' — the AI-only sales/demo widget on AeroReply's own landing
+//                 page. Belongs to no tenant, is never persisted as a
+//                 ticket, and can never trigger a human handoff.
+//
+// This resolution is the single source of truth for room membership —
+// everything downstream (`.to(projectId).emit(...)`) relies on it to keep
+// tenants fully isolated from one another.
+async function resolveSocketIdentity(socket) {
+  const auth = socket.handshake.auth || {};
+  const query = socket.handshake.query || {};
+
+  const token = auth.token;
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id);
+      if (user) {
+        return { role: 'agent', projectId: user.projectId };
+      }
+    } catch {
+      // Invalid/expired token — fall through and treat as unauthenticated.
+    }
+  }
+
+  const queryProjectId = query.projectId;
+  if (queryProjectId && String(queryProjectId).trim()) {
+    return { role: 'customer', projectId: String(queryProjectId).trim() };
+  }
+
+  return { role: 'landing', projectId: null };
+}
+
 function registerSocketHandlers(io) {
-  // In-memory presence tracking (per-process; fine for a single gateway instance)
-  const agentSockets = new Set();
-  const visitorSockets = new Set();
+  // Presence tracking is scoped per tenant (projectId), never global — this
+  // is what guarantees Agent A never sees Agent B's visitors or online status.
+  const agentsByProject = new Map(); // projectId -> Set<socketId>
+  const visitorsByProject = new Map(); // projectId -> Set<socketId>
 
-  function broadcastAgentStatus() {
-    io.emit('agent:status', { online: agentSockets.size > 0 });
+  function addPresence(map, projectId, socketId) {
+    if (!map.has(projectId)) map.set(projectId, new Set());
+    map.get(projectId).add(socketId);
   }
 
-  function broadcastVisitorCount() {
-    io.emit('visitors:count', { count: visitorSockets.size });
+  function removePresence(map, projectId, socketId) {
+    const set = map.get(projectId);
+    if (!set) return false;
+    const removed = set.delete(socketId);
+    if (set.size === 0) map.delete(projectId);
+    return removed;
   }
 
-  io.on('connection', (socket) => {
-    console.log(`[Socket] Client connected — ID: ${socket.id}`);
+  function broadcastAgentStatus(projectId) {
+    const online = (agentsByProject.get(projectId)?.size ?? 0) > 0;
+    io.to(projectId).emit('agent:status', { online });
+  }
 
-    // Every new connection is assumed to be a customer/visitor until it
-    // identifies itself as an agent via agent:join.
-    visitorSockets.add(socket.id);
-    broadcastVisitorCount();
+  function broadcastVisitorCount(projectId) {
+    const count = visitorsByProject.get(projectId)?.size ?? 0;
+    io.to(projectId).emit('visitors:count', { count });
+  }
 
-    // Tell the newly-connected client the current human-agent availability
-    // so the widget can decide whether to show the live chat or the
-    // AI fallback / lead-capture frame.
-    socket.emit('agent:status', { online: agentSockets.size > 0 });
+  io.on('connection', async (socket) => {
+    const { role, projectId } = await resolveSocketIdentity(socket);
+    socket.data.role = role;
+    socket.data.projectId = projectId;
+
+    console.log(
+      `[Socket] Connected — id=${socket.id} role=${role} project=${projectId || 'none (landing/sales demo)'}`
+    );
+
+    if (projectId) {
+      // Every socket belonging to a tenant joins a room named after that
+      // tenant's projectId — this is the isolation boundary for every
+      // real-time event emitted below.
+      socket.join(projectId);
+
+      if (role === 'agent') {
+        addPresence(agentsByProject, projectId, socket.id);
+        broadcastAgentStatus(projectId);
+      } else {
+        addPresence(visitorsByProject, projectId, socket.id);
+        broadcastVisitorCount(projectId);
+      }
+
+      socket.emit('agent:status', {
+        online: (agentsByProject.get(projectId)?.size ?? 0) > 0,
+      });
+    }
 
     // Widgets that mount after the initial connection (e.g. a floating
     // launcher opened later) can miss the one-shot emit above — let them
     // explicitly ask for the current status instead of relying on timing.
     socket.on('agent:status:request', () => {
-      socket.emit('agent:status', { online: agentSockets.size > 0 });
+      if (!projectId) {
+        // Landing-page sales demo: always AI, never checks human presence.
+        socket.emit('agent:status', { online: false });
+        return;
+      }
+      socket.emit('agent:status', {
+        online: (agentsByProject.get(projectId)?.size ?? 0) > 0,
+      });
     });
 
     // ---------------------------------------------------------------
     // Customer sends a new message
     // ---------------------------------------------------------------
     socket.on('customer:message', async (data) => {
-      const { conversationId, message } = data;
+      const { conversationId, message } = data || {};
 
       if (!conversationId || !message) {
         socket.emit('error:invalid', { error: 'conversationId and message are required.' });
         return;
       }
 
-      console.log(`[Socket] customer:message | conv=${conversationId} | msg="${message}"`);
+      // The landing-page demo has no tenant and is always sales-mode: it
+      // never creates a ticket and can never escalate to a human agent.
+      const isLandingDemo = !projectId;
+      const aiMode = isLandingDemo ? 'sales' : 'support';
+
+      console.log(
+        `[Socket] customer:message | project=${projectId || 'landing'} | conv=${conversationId} | msg="${message}"`
+      );
 
       try {
-        // 1. Upsert the ticket and append the customer message
-        let ticket = await Ticket.findOneAndUpdate(
-          { conversationId },
-          {
-            $setOnInsert: { conversationId, customerSocketId: socket.id },
-            $push: { messages: { role: 'customer', content: message } },
-          },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
+        let ticket = null;
+        let historySource = [];
 
-        // Keep the socket in a named room for this conversation
-        socket.join(conversationId);
+        if (!isLandingDemo) {
+          // 1. Upsert the ticket (scoped to this tenant) and append the message
+          ticket = await Ticket.findOneAndUpdate(
+            { conversationId, projectId },
+            {
+              $setOnInsert: { conversationId, projectId, customerSocketId: socket.id },
+              $push: { messages: { role: 'customer', content: message } },
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+          );
 
-        // 2. If ticket is in handoff status, route to human agent room only
-        if (ticket.status === 'handoff') {
-          io.to(`agents:${conversationId}`).emit('agent:customer_message', {
-            conversationId,
-            message,
-            timestamp: new Date().toISOString(),
-          });
-          return;
+          // Keep the socket in a named room for this specific conversation
+          socket.join(conversationId);
+
+          // 2. If the ticket is already in handoff, route straight to the
+          // tenant's agent room only — never globally.
+          if (ticket.status === 'handoff') {
+            io.to(projectId).emit('agent:customer_message', {
+              conversationId,
+              message,
+              timestamp: new Date().toISOString(),
+            });
+            return;
+          }
+
+          historySource = ticket.messages.slice(0, -1);
         }
 
         // 3. Call the Python AI microservice
-        const history = buildHistoryPayload(ticket.messages.slice(0, -1));
-        const aiResult = await callAIService(message, conversationId, history);
+        const history = buildHistoryPayload(historySource);
+        const aiResult = await callAIService(message, conversationId, history, aiMode);
 
-        const { reply, triggerHandoff } = aiResult;
+        const reply = aiResult.reply;
+        // Sales-demo conversations can never escalate, regardless of what
+        // the model returns — this is enforced here too, not just in the
+        // AI service, so a misbehaving prompt can't create a phantom ticket.
+        const triggerHandoff = isLandingDemo ? false : Boolean(aiResult.triggerHandoff);
 
         // 4. Persist the AI reply
-        await Ticket.findOneAndUpdate(
-          { conversationId },
-          {
-            $push: { messages: { role: 'ai', content: reply } },
-            ...(triggerHandoff && { $set: { status: 'handoff' } }),
-          }
-        );
+        if (!isLandingDemo) {
+          await Ticket.findOneAndUpdate(
+            { conversationId, projectId },
+            {
+              $push: { messages: { role: 'ai', content: reply } },
+              ...(triggerHandoff && { $set: { status: 'handoff' } }),
+            }
+          );
+        }
 
         // 5. Emit the AI reply back to the customer
         socket.emit('agent:reply', {
@@ -114,11 +219,11 @@ function registerSocketHandlers(io) {
           timestamp: new Date().toISOString(),
         });
 
-        // 6. If handoff triggered, notify agent dashboard room
+        // 6. If handoff triggered, notify only this tenant's agent room
         if (triggerHandoff) {
-          console.log(`[Socket] Handoff triggered for conv=${conversationId}`);
+          console.log(`[Socket] Handoff triggered | project=${projectId} | conv=${conversationId}`);
           socket.emit('handoff:triggered', { conversationId });
-          io.to('agents:dashboard').emit('handoff:new_ticket', {
+          io.to(projectId).emit('handoff:new_ticket', {
             conversationId,
             lastMessage: message,
             timestamp: new Date().toISOString(),
@@ -133,30 +238,21 @@ function registerSocketHandlers(io) {
     });
 
     // ---------------------------------------------------------------
-    // Human support agent joins the dashboard / a conversation
+    // Human agent dashboard acknowledgement. Room membership/presence is
+    // already established above from the verified JWT at connection time —
+    // this handler is just a client-triggered ack, it never determines
+    // identity or room membership itself.
     // ---------------------------------------------------------------
-    socket.on('agent:join', async (data) => {
+    socket.on('agent:join', (data) => {
       const { conversationId } = data || {};
-
+      if (role !== 'agent' || !projectId) {
+        socket.emit('error:invalid', { error: 'Not authorized as an agent.' });
+        return;
+      }
       if (conversationId) {
-        socket.join(`agents:${conversationId}`);
-        console.log(`[Socket] Agent joined conv room: agents:${conversationId}`);
-      } else {
-        socket.join('agents:dashboard');
-        console.log(`[Socket] Agent joined dashboard`);
+        socket.join(conversationId);
       }
-
-      // An agent socket is not a customer/visitor — reclassify it and
-      // mark the human agent as online.
-      if (visitorSockets.delete(socket.id)) {
-        broadcastVisitorCount();
-      }
-      if (!agentSockets.has(socket.id)) {
-        agentSockets.add(socket.id);
-        broadcastAgentStatus();
-      }
-
-      socket.emit('agent:joined', { conversationId: conversationId || null });
+      socket.emit('agent:joined', { conversationId: conversationId || null, projectId });
     });
 
     // ---------------------------------------------------------------
@@ -169,18 +265,23 @@ function registerSocketHandlers(io) {
         socket.emit('error:invalid', { error: 'A valid conversationId and email are required.' });
         return;
       }
+      if (!projectId) {
+        // The landing/sales demo never falls back to lead capture.
+        socket.emit('error:invalid', { error: 'Lead capture is not available on this widget.' });
+        return;
+      }
 
       try {
         const ticket = await Ticket.findOneAndUpdate(
-          { conversationId },
+          { conversationId, projectId },
           {
-            $setOnInsert: { conversationId, customerSocketId: socket.id },
+            $setOnInsert: { conversationId, projectId, customerSocketId: socket.id },
             $set: { 'metadata.email': String(email).trim() },
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
 
-        console.log(`[Socket] Lead captured | conv=${conversationId} | email set`);
+        console.log(`[Socket] Lead captured | project=${projectId} | conv=${conversationId} | email set`);
         socket.emit('lead:captured', { conversationId, email: ticket.metadata.get('email') });
       } catch (err) {
         console.error(`[Socket] Error capturing lead email — ${err.message}`);
@@ -192,22 +293,35 @@ function registerSocketHandlers(io) {
     // Human agent sends a message to a customer
     // ---------------------------------------------------------------
     socket.on('agent:message', async (data) => {
-      const { conversationId, message } = data;
+      const { conversationId, message } = data || {};
 
       if (!conversationId || !message) {
         socket.emit('error:invalid', { error: 'conversationId and message are required.' });
         return;
       }
+      if (role !== 'agent' || !projectId) {
+        socket.emit('error:invalid', { error: 'Not authorized as an agent.' });
+        return;
+      }
 
-      console.log(`[Socket] agent:message | conv=${conversationId} | msg="${message}"`);
+      console.log(`[Socket] agent:message | project=${projectId} | conv=${conversationId} | msg="${message}"`);
 
       try {
-        await Ticket.findOneAndUpdate(
-          { conversationId },
+        // Scoping the update by projectId means an agent can never mutate
+        // another tenant's ticket, even if they somehow guess its
+        // conversationId.
+        const updated = await Ticket.findOneAndUpdate(
+          { conversationId, projectId },
           { $push: { messages: { role: 'agent', content: message } } }
         );
 
-        // Deliver the human agent reply to the customer's room
+        if (!updated) {
+          socket.emit('error:invalid', { error: 'Ticket not found for this project.' });
+          return;
+        }
+
+        // Deliver the human agent reply to the customer's private
+        // conversation room.
         io.to(conversationId).emit('agent:reply', {
           conversationId,
           reply: message,
@@ -225,12 +339,16 @@ function registerSocketHandlers(io) {
     // ---------------------------------------------------------------
     socket.on('ticket:close', async (data) => {
       const { conversationId } = data || {};
-      if (!conversationId) return;
+      if (!conversationId || role !== 'agent' || !projectId) return;
 
       try {
-        await Ticket.findOneAndUpdate({ conversationId }, { $set: { status: 'closed' } });
+        const updated = await Ticket.findOneAndUpdate(
+          { conversationId, projectId },
+          { $set: { status: 'closed' } }
+        );
+        if (!updated) return;
         io.to(conversationId).emit('ticket:closed', { conversationId });
-        console.log(`[Socket] Ticket closed: conv=${conversationId}`);
+        console.log(`[Socket] Ticket closed | project=${projectId} | conv=${conversationId}`);
       } catch (err) {
         console.error(`[Socket] Error closing ticket — ${err.message}`);
       }
@@ -242,11 +360,16 @@ function registerSocketHandlers(io) {
     socket.on('disconnect', () => {
       console.log(`[Socket] Client disconnected — ID: ${socket.id}`);
 
-      if (visitorSockets.delete(socket.id)) {
-        broadcastVisitorCount();
-      }
-      if (agentSockets.delete(socket.id)) {
-        broadcastAgentStatus();
+      if (!projectId) return;
+
+      if (role === 'agent') {
+        if (removePresence(agentsByProject, projectId, socket.id)) {
+          broadcastAgentStatus(projectId);
+        }
+      } else {
+        if (removePresence(visitorsByProject, projectId, socket.id)) {
+          broadcastVisitorCount(projectId);
+        }
       }
     });
   });
