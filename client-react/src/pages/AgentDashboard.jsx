@@ -105,7 +105,7 @@ export default function AgentDashboard() {
           />
         </div>
 
-        {/* Primary nav */}
+        {/* Primary nav + More accordion grouped together */}
         <nav style={styles.nav}>
           {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
             <button
@@ -121,12 +121,9 @@ export default function AgentDashboard() {
               <span>{label}</span>
             </button>
           ))}
-        </nav>
 
-        <div style={styles.spacer} />
-
-        {/* ---- More accordion ---- */}
-        <div style={styles.moreWrap}>
+          {/* ---- More accordion — sits directly below Live Visitors ---- */}
+          <div style={styles.moreWrap}>
           <button
             type="button"
             onClick={() => setMoreOpen((v) => !v)}
@@ -188,6 +185,9 @@ export default function AgentDashboard() {
             </div>
           )}
         </div>
+        </nav>
+
+        <div style={styles.spacer} />
       </aside>
 
       <div className="ard-content" style={styles.content}>

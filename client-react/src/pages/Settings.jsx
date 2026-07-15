@@ -1,20 +1,24 @@
 import { useState } from 'react'
+import { useAuth } from '../context/AuthContext'
 
-function buildEmbedSnippet(origin) {
+function buildEmbedSnippet(origin, projectId) {
   return `<script
   src="${origin}/widget.js"
-  data-aeroreply-widget
+  data-aeroreply-project-id="${projectId}"
   async
 ></script>`
 }
 
-// Settings Panel — business configuration screen, including the
-// copy-paste embed snippet for the floating ChatWidget.
+// Integration Code panel — shows the tenant's unique, copy-paste embed
+// snippet. The snippet is generated dynamically using the authenticated
+// user's projectId so every account gets its own isolated widget script.
 export default function Settings() {
+  const { user } = useAuth()
   const [copied, setCopied] = useState(false)
-  const snippet = buildEmbedSnippet(
-    typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.com'
-  )
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.com'
+  const projectId = user?.projectId ?? 'YOUR_PROJECT_ID'
+  const snippet = buildEmbedSnippet(origin, projectId)
 
   async function copySnippet() {
     try {
@@ -29,17 +33,18 @@ export default function Settings() {
   return (
     <div style={styles.page}>
       <header style={styles.header}>
-        <h1 style={styles.title}>Settings</h1>
-        <p style={styles.subtitle}>Business configuration for your AeroReply account.</p>
+        <h1 style={styles.title}>Integration Code</h1>
+        <p style={styles.subtitle}>Your unique widget snippet — scoped exclusively to your project.</p>
       </header>
 
       <section style={styles.section}>
-        <h2 style={styles.sectionTitle}>Widget Integration</h2>
+        <h2 style={styles.sectionTitle}>Embed the Chat Widget</h2>
         <p style={styles.sectionDesc}>
-          Copy this snippet into your website's HTML (just before the closing{' '}
-          <code>&lt;/body&gt;</code> tag) to embed the AeroReply chat widget. Visitors
-          will be connected to a live agent when one is online, or prompted to leave
-          their email for a follow-up when no one is available.
+          Paste this snippet into your website's HTML just before the closing{' '}
+          <code style={styles.inlineCode}>&lt;/body&gt;</code> tag. The{' '}
+          <code style={styles.inlineCode}>data-aeroreply-project-id</code> attribute is your
+          unique project key — all messages and tickets will be routed exclusively to your
+          agent dashboard and no one else's.
         </p>
 
         <div style={styles.snippetBlock}>
@@ -47,8 +52,13 @@ export default function Settings() {
             <code>{snippet}</code>
           </pre>
           <button style={styles.copyBtn} onClick={copySnippet} type="button">
-            {copied ? 'Copied!' : 'Copy Code'}
+            {copied ? '✓ Copied!' : 'Copy Code'}
           </button>
+        </div>
+
+        <div style={styles.projectIdRow}>
+          <span style={styles.projectIdLabel}>Your Project ID</span>
+          <code style={styles.projectIdValue}>{projectId}</code>
         </div>
       </section>
     </div>
@@ -64,21 +74,18 @@ const styles = {
     overflowY: 'auto',
   },
   header: { marginBottom: '24px' },
-  title: { margin: 0, fontSize: '24px', fontWeight: 800 },
+  title: { margin: 0, fontSize: '24px', fontWeight: 800, color: '#f9fafb' },
   subtitle: { margin: '4px 0 0', color: '#9ca3af', fontSize: '14px' },
-  section: {
-    maxWidth: '640px',
-  },
-  sectionTitle: {
-    margin: '0 0 8px',
-    fontSize: '16px',
-    fontWeight: 700,
-  },
-  sectionDesc: {
-    margin: '0 0 16px',
-    color: '#9ca3af',
-    fontSize: '13px',
-    lineHeight: 1.6,
+  section: { maxWidth: '640px' },
+  sectionTitle: { margin: '0 0 8px', fontSize: '16px', fontWeight: 700, color: '#f9fafb' },
+  sectionDesc: { margin: '0 0 16px', color: '#9ca3af', fontSize: '13px', lineHeight: 1.6 },
+  inlineCode: {
+    background: '#1f2937',
+    color: '#93c5fd',
+    padding: '1px 5px',
+    borderRadius: '4px',
+    fontSize: '12px',
+    fontFamily: 'monospace',
   },
   snippetBlock: {
     position: 'relative',
@@ -86,6 +93,7 @@ const styles = {
     border: '1px solid #374151',
     borderRadius: '10px',
     padding: '16px',
+    marginBottom: '14px',
   },
   snippetPre: {
     margin: 0,
@@ -108,5 +116,29 @@ const styles = {
     fontSize: '12px',
     fontWeight: 600,
     cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  projectIdRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    background: '#111827',
+    border: '1px solid #1f2937',
+    borderRadius: '8px',
+    padding: '10px 14px',
+  },
+  projectIdLabel: {
+    fontSize: '11px',
+    fontWeight: 700,
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    letterSpacing: '0.4px',
+    flexShrink: 0,
+  },
+  projectIdValue: {
+    fontFamily: 'monospace',
+    fontSize: '13px',
+    color: '#a78bfa',
+    wordBreak: 'break-all',
   },
 }
