@@ -12,13 +12,9 @@
  *
  * The widget reads `data-aeroreply-project-id` from its own <script> tag and
  * passes it as the `projectId` query-string parameter during the Socket.io
- * handshake.  The gateway uses that value to:
- *   - join the socket to the correct tenant room (`socket.join(projectId)`)
- *   - scope every ticket read/write to that project
- *   - broadcast events exclusively inside that room
- *
- * This means Agent A's visitors, tickets, and messages are never visible to
- * Agent B, even when both are connected to the same gateway server.
+ * handshake.  When the customer socket connects the gateway looks up that
+ * project's saved widgetSettings and emits them back as a `widget:config`
+ * event, which this script applies immediately.
  */
 (function () {
   'use strict';
@@ -42,8 +38,6 @@
     return;
   }
 
-  // Derive the gateway origin from the URL the script was loaded from so the
-  // widget always talks back to the same server that served it.
   var GATEWAY_ORIGIN = (function () {
     try {
       return new URL(scriptTag.src).origin;
@@ -56,15 +50,32 @@
   if (window.__aeroreplyLoaded) return;
   window.__aeroreplyLoaded = true;
 
-  /* ── 3. Inject widget styles ──────────────────────────────────────────── */
-  var style = document.createElement('style');
-  style.textContent = [
-    '#ar-launcher{position:fixed;bottom:24px;right:24px;z-index:2147483646;width:56px;height:56px;border-radius:50%;border:none;background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff;cursor:pointer;box-shadow:0 10px 26px rgba(59,130,246,0.45);display:flex;align-items:center;justify-content:center;font-size:22px;transition:transform 0.2s;}',
+  /* ── 3. SVG icon library ──────────────────────────────────────────────── */
+  var ICONS = {
+    'speech-bubble':
+      '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    'message':
+      '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>',
+    'headset':
+      '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>',
+  };
+
+  function getIconSvg(name) {
+    return ICONS[name] || ICONS['speech-bubble'];
+  }
+
+  /* ── 4. Inject base widget styles ─────────────────────────────────────── */
+  var baseStyle = document.createElement('style');
+  baseStyle.textContent = [
+    '#ar-launcher{position:fixed;bottom:24px;right:24px;left:auto;z-index:2147483646;width:56px;height:56px;border-radius:50%;border:none;background:#0f172a;color:#ffffff;cursor:pointer;box-shadow:0 10px 26px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;transition:transform 0.2s,background 0.2s;}',
     '#ar-launcher:hover{transform:scale(1.08);}',
-    '#ar-frame{position:fixed;bottom:90px;right:24px;z-index:2147483645;width:380px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 120px);border:1px solid #2d3648;border-radius:18px;overflow:hidden;background:linear-gradient(180deg,#131a2a 0%,#0e1420 100%);font-family:system-ui,sans-serif;font-size:14px;color:#f9fafb;box-shadow:0 20px 50px rgba(0,0,0,0.5);display:none;flex-direction:column;}',
+    '#ar-frame{position:fixed;bottom:90px;right:24px;left:auto;z-index:2147483645;width:380px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 120px);border:1px solid #2d3648;border-radius:18px;overflow:hidden;background:linear-gradient(180deg,#131a2a 0%,#0e1420 100%);font-family:system-ui,sans-serif;font-size:14px;color:#f9fafb;box-shadow:0 20px 50px rgba(0,0,0,0.5);display:none;flex-direction:column;}',
     '#ar-frame.ar-open{display:flex;}',
-    '#ar-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:linear-gradient(135deg,#1e293b 0%,#172033 100%);border-bottom:1px solid #2d3648;flex-shrink:0;}',
+    '#ar-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:#0f172a;border-bottom:1px solid #2d3648;flex-shrink:0;}',
+    '#ar-header-text{display:flex;flex-direction:column;gap:1px;}',
     '#ar-header-title{font-weight:700;font-size:15px;letter-spacing:-0.2px;}',
+    '#ar-header-subtitle{font-size:11px;opacity:0.7;margin-top:2px;}',
+    '#ar-header-controls{display:flex;align-items:center;gap:10px;flex-shrink:0;}',
     '#ar-status{font-size:12px;}',
     '#ar-close{background:transparent;border:none;color:#9ca3af;cursor:pointer;padding:4px;border-radius:6px;line-height:1;font-size:18px;}',
     '#ar-messages{flex:1;display:flex;flex-direction:column;gap:8px;padding:12px 16px;overflow-y:auto;}',
@@ -75,23 +86,28 @@
     '.ar-sender{font-size:11px;opacity:0.75;font-weight:600;margin-bottom:2px;display:block;}',
     '#ar-form{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #374151;background:#1f2937;flex-shrink:0;}',
     '#ar-input{flex:1;background:#374151;border:1px solid #4b5563;border-radius:8px;padding:8px 12px;color:#f9fafb;font-size:14px;outline:none;font-family:inherit;}',
-    '#ar-send{background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer;font-weight:600;font-size:14px;font-family:inherit;}',
+    '#ar-send{background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer;font-weight:600;font-size:14px;font-family:inherit;transition:background 0.2s,color 0.2s;}',
     '#ar-send:disabled{opacity:0.5;cursor:default;}',
     '#ar-hint{color:#6b7280;text-align:center;margin-top:40px;font-size:13px;}',
     '#ar-lead-form{flex:1;display:flex;flex-direction:column;justify-content:center;gap:14px;padding:24px 20px;}',
     '#ar-lead-msg{margin:0;line-height:1.6;color:#d1d5db;font-size:14px;}',
     '#ar-lead-input{background:#374151;border:1px solid #4b5563;border-radius:8px;padding:8px 12px;color:#f9fafb;font-size:14px;outline:none;font-family:inherit;}',
-    '#ar-lead-submit{background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600;font-size:14px;font-family:inherit;}',
+    '#ar-lead-submit{background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600;font-size:14px;font-family:inherit;transition:background 0.2s,color 0.2s;}',
     '#ar-checking{flex:1;display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:13px;}',
   ].join('');
-  document.head.appendChild(style);
+  document.head.appendChild(baseStyle);
 
-  /* ── 4. Build DOM ─────────────────────────────────────────────────────── */
+  // A second style block written by applyConfig() so dynamic overrides
+  // always cascade on top of the base styles without mutating them.
+  var configStyle = document.createElement('style');
+  document.head.appendChild(configStyle);
+
+  /* ── 5. Build DOM ─────────────────────────────────────────────────────── */
   // Launcher button
   var launcher = document.createElement('button');
   launcher.id = 'ar-launcher';
   launcher.setAttribute('aria-label', 'Open AeroReply chat');
-  launcher.innerHTML = '&#128172;'; // 💬
+  launcher.innerHTML = getIconSvg('speech-bubble');
   document.body.appendChild(launcher);
 
   // Chat frame
@@ -99,8 +115,11 @@
   frame.id = 'ar-frame';
   frame.innerHTML =
     '<div id="ar-header">' +
-      '<span id="ar-header-title">AeroReply Support</span>' +
-      '<div style="display:flex;align-items:center;gap:10px;">' +
+      '<div id="ar-header-text">' +
+        '<span id="ar-header-title">Live Support</span>' +
+        '<span id="ar-header-subtitle">Typically replies in minutes</span>' +
+      '</div>' +
+      '<div id="ar-header-controls">' +
         '<span id="ar-status" style="color:#f59e0b;">○ Connecting…</span>' +
         '<button id="ar-close" aria-label="Close chat">&#10005;</button>' +
       '</div>' +
@@ -116,18 +135,88 @@
     statusEl.style.color = color;
   }
 
-  /* ── 5. Toggle open/close ─────────────────────────────────────────────── */
+  /* ── 6. Apply dynamic widget config ─────────────────────────────────────
+   * Called once when the gateway emits `widget:config` immediately after
+   * the customer socket connects.  Uses a second <style> block to cascade
+   * colour and position overrides on top of the base CSS.
+   * ─────────────────────────────────────────────────────────────────────── */
+  var CLOSE_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+  function applyConfig(cfg) {
+    if (!cfg) return;
+
+    var primary   = cfg.primaryColor  || '#0f172a';
+    var textColor = cfg.textIconColor || '#ffffff';
+    var pos       = cfg.position === 'left' ? 'left' : 'right';
+    var opp       = pos === 'left' ? 'right' : 'left';
+    var offset    = Number(cfg.offset) || 20;
+    var offsetPx  = offset + 'px';
+    var frameBottomPx = (offset + 66) + 'px';
+
+    // ── Cascade overrides ──
+    configStyle.textContent = [
+      // Launcher position + colours
+      '#ar-launcher {',
+      '  ' + pos + ': ' + offsetPx + ';',
+      '  ' + opp + ': auto;',
+      '  bottom: ' + offsetPx + ';',
+      '  background: ' + primary + ' !important;',
+      '  color: ' + textColor + ' !important;',
+      '}',
+      // Frame position
+      '#ar-frame {',
+      '  ' + pos + ': ' + offsetPx + ';',
+      '  ' + opp + ': auto;',
+      '  bottom: ' + frameBottomPx + ';',
+      '}',
+      // Header background
+      '#ar-header { background: ' + primary + ' !important; }',
+      // Header text / icon colours
+      '#ar-header-title, #ar-header-subtitle { color: ' + textColor + ' !important; }',
+      // Send button
+      '#ar-send { background: ' + primary + ' !important; color: ' + textColor + ' !important; }',
+      // Lead submit button
+      '#ar-lead-submit { background: ' + primary + ' !important; color: ' + textColor + ' !important; }',
+      // Customer chat bubbles
+      '.ar-bubble-customer { background: ' + primary + ' !important; color: ' + textColor + ' !important; }',
+    ].join('\n');
+
+    // ── Text content ──
+    var titleEl = document.getElementById('ar-header-title');
+    if (titleEl) titleEl.textContent = cfg.widgetTitle || 'Live Support';
+
+    var subtitleEl = document.getElementById('ar-header-subtitle');
+    if (subtitleEl) subtitleEl.textContent = cfg.widgetSubtitle || 'Typically replies in minutes';
+
+    // ── Launcher icon (when closed) ──
+    var currentIcon = getIconSvg(cfg.widgetIcon);
+    launcher.innerHTML = currentIcon;
+    launcher.setAttribute('aria-label', 'Open AeroReply chat');
+
+    // Store icon choice so toggleFrame can restore it when closing
+    launcher._arClosedIcon = currentIcon;
+    launcher._arPrimaryColor = primary;
+    launcher._arTextColor = textColor;
+  }
+
+  /* ── 7. Toggle open/close ─────────────────────────────────────────────── */
   var isOpen = false;
   function toggleFrame() {
     isOpen = !isOpen;
     frame.classList.toggle('ar-open', isOpen);
-    launcher.innerHTML = isOpen ? '&#10005;' : '&#128172;';
-    launcher.setAttribute('aria-label', isOpen ? 'Close chat' : 'Open AeroReply chat');
+    if (isOpen) {
+      launcher.innerHTML = CLOSE_SVG;
+      launcher.setAttribute('aria-label', 'Close chat');
+    } else {
+      launcher.innerHTML = launcher._arClosedIcon || getIconSvg('speech-bubble');
+      launcher.setAttribute('aria-label', 'Open AeroReply chat');
+    }
   }
   launcher.addEventListener('click', toggleFrame);
   document.getElementById('ar-close').addEventListener('click', toggleFrame);
 
-  /* ── 6. Load Socket.io client from the gateway origin ────────────────── */
+  /* ── 8. Load Socket.io client from the gateway origin ────────────────── */
   var socketScript = document.createElement('script');
   socketScript.src = GATEWAY_ORIGIN + '/socket.io/socket.io.js';
   socketScript.onload = initSocket;
@@ -138,7 +227,7 @@
   };
   document.head.appendChild(socketScript);
 
-  /* ── 7. Socket.io connection + event wiring ───────────────────────────── */
+  /* ── 9. Socket.io connection + event wiring ───────────────────────────── */
   var CONV_KEY = 'ar_conv_' + PROJECT_ID;
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -152,9 +241,6 @@
   }
 
   function initSocket() {
-    // Pass the projectId in the Socket.io handshake query so the gateway's
-    // resolveSocketIdentity() classifies this as a 'customer' socket and
-    // joins it to the correct projectId room.
     var socket = io(GATEWAY_ORIGIN, {
       query: { projectId: PROJECT_ID },
       transports: ['websocket', 'polling'],
@@ -173,6 +259,12 @@
 
     socket.on('disconnect', function () {
       setStatus('○ Reconnecting…', '#f59e0b');
+    });
+
+    // Gateway sends saved widgetSettings right after customer connects —
+    // apply them immediately so the widget reflects the owner's branding.
+    socket.on('widget:config', function (cfg) {
+      applyConfig(cfg);
     });
 
     socket.on('agent:status', function (data) {
@@ -209,12 +301,10 @@
 
     /* ── Render body based on agent availability ── */
     function renderBody() {
-      // Remove checking/lead views; build the appropriate body
       var old = frame.querySelector('#ar-checking, #ar-lead-form, #ar-chat-body');
       if (old) old.parentNode.removeChild(old);
 
       if (agentOnline === false) {
-        // No agent available — show lead-capture form
         var lf = document.createElement('div');
         lf.id = 'ar-lead-form';
         lf.innerHTML =
@@ -226,7 +316,6 @@
         return;
       }
 
-      // Agent is online (or status just became true) — show chat UI
       var body = document.createElement('div');
       body.id = 'ar-chat-body';
       body.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;';

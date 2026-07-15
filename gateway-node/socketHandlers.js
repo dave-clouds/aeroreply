@@ -117,6 +117,17 @@ function registerSocketHandlers(io) {
       } else {
         addPresence(visitorsByProject, projectId, socket.id);
         broadcastVisitorCount(projectId);
+
+        // Send the project owner's widget customisation settings so the
+        // embedded widget.js can apply them immediately after connecting.
+        try {
+          const projectOwner = await User.findOne({ projectId }).select('widgetSettings');
+          if (projectOwner) {
+            socket.emit('widget:config', projectOwner.widgetSettings ?? {});
+          }
+        } catch (err) {
+          console.warn(`[Socket] Could not fetch widgetSettings for project=${projectId}: ${err.message}`);
+        }
       }
 
       socket.emit('agent:status', {

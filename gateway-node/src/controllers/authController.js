@@ -67,6 +67,7 @@ async function getMe(req, res, next) {
       email: req.user.email,
       projectId: req.user.projectId,
       role: req.user.role,
+      widgetSettings: req.user.widgetSettings,
     });
   } catch (err) {
     next(err);

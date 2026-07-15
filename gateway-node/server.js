@@ -8,6 +8,7 @@ const { connectDB } = require('./config/db');
 const { registerSocketHandlers } = require('./socketHandlers');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 const Ticket = require('./models/Ticket');
+const User = require('./src/models/User');
 const authRoutes = require('./src/routes/authRoutes');
 const { protect } = require('./src/middleware/authMiddleware');
 
@@ -129,6 +130,43 @@ app.patch('/api/tickets/:conversationId/status', protect, async (req, res, next)
       return next(err);
     }
     res.json({ ticket });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Widget settings routes — authenticated agents only
+// ---------------------------------------------------------------------------
+
+// GET current user's widget settings
+app.get('/api/user/widget-settings', protect, async (req, res, next) => {
+  try {
+    res.json({ widgetSettings: req.user.widgetSettings });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH to save all widget settings in one request
+app.patch('/api/user/widget-settings', protect, async (req, res, next) => {
+  try {
+    const ALLOWED = [
+      'widgetTitle', 'widgetSubtitle', 'primaryColor',
+      'textIconColor', 'widgetIcon', 'position', 'offset',
+    ];
+    const updates = {};
+    for (const key of ALLOWED) {
+      if (req.body[key] !== undefined) {
+        updates[`widgetSettings.${key}`] = req.body[key];
+      }
+    }
+    const updated = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    );
+    res.json({ widgetSettings: updated.widgetSettings });
   } catch (err) {
     next(err);
   }

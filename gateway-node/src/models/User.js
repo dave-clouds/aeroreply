@@ -30,6 +30,18 @@ const UserSchema = new mongoose.Schema(
       enum: ['agent', 'admin'],
       default: 'agent',
     },
+
+    // Per-tenant widget appearance configuration.  All fields have safe
+    // defaults so existing users automatically inherit a valid config.
+    widgetSettings: {
+      widgetTitle: { type: String, default: 'Live Support' },
+      widgetSubtitle: { type: String, default: 'Typically replies in minutes' },
+      primaryColor: { type: String, default: '#0f172a' },
+      textIconColor: { type: String, default: '#ffffff' },
+      widgetIcon: { type: String, default: 'speech-bubble' },
+      position: { type: String, enum: ['left', 'right'], default: 'right' },
+      offset: { type: Number, default: 20 },
+    },
   },
   { timestamps: true }
 );

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Home, MessageSquare, Users, Menu, X,
-  MoreHorizontal, Code2, UserCircle, LogOut, ChevronDown,
+  MoreHorizontal, Code2, UserCircle, LogOut, ChevronDown, Sliders,
 } from 'lucide-react'
 import { useSocket } from '../context/SocketContext'
 import { useAuth } from '../context/AuthContext'
@@ -11,6 +11,7 @@ import AgentWorkspace from './AgentWorkspace'
 import LiveVisitors from './LiveVisitors'
 import Settings from './Settings'
 import AccountSettings from './AccountSettings'
+import WidgetSettings from './WidgetSettings'
 
 // Primary nav — the four main dashboard areas.
 const NAV_ITEMS = [
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
 // Views reachable from the "More" submenu (not shown in primary nav).
 const MORE_VIEWS = {
   integrationCode: Settings,
+  widgetSettings: WidgetSettings,
   accountSettings: AccountSettings,
 }
 
@@ -158,6 +160,18 @@ export default function AgentDashboard() {
               >
                 <Code2 size={15} strokeWidth={2} />
                 <span>Integration Code</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => selectMore('widgetSettings')}
+                style={{
+                  ...styles.submenuItem,
+                  ...(active === 'widgetSettings' ? styles.submenuItemActive : {}),
+                }}
+              >
+                <Sliders size={15} strokeWidth={2} />
+                <span>Widget Settings</span>
               </button>
 
               <button
