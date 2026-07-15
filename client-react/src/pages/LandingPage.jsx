@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Bot, LayoutDashboard, Users2, ArrowRight, Menu, X as CloseIcon } from 'lucide-react'
 import ChatWidget from '../components/ChatWidget'
+import { useAuth } from '../context/AuthContext'
 import heroImage from '../assets/hero.png'
 
 const NAV_LINKS = [
@@ -33,10 +34,19 @@ const FEATURES = [
 
 // The public marketing surface for AeroReply. Pure presentation — the only
 // live functionality on this page is the embedded ChatWidget demo, which
-// uses the exact same component (and socket wiring) that ships to customers.
-export default function LandingPage({ onGoToDashboard }) {
+// uses the landing variant: AI-only sales assistant that never triggers
+// human handoff or alerts agent dashboards.
+export default function LandingPage() {
+  const { user } = useAuth()
+  const navigate = useNavigate()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [widgetOpen, setWidgetOpen] = useState(false)
+
+  // If already authenticated, go straight to the dashboard.
+  // Otherwise send the visitor to the register flow.
+  function handleGetStarted() {
+    navigate(user ? '/dashboard' : '/register')
+  }
 
   return (
     <div style={styles.page}>
@@ -62,8 +72,8 @@ export default function LandingPage({ onGoToDashboard }) {
             <Link to="/login" style={styles.navLoginLink}>
               Log in
             </Link>
-            <button type="button" style={styles.ctaButtonSmall} onClick={onGoToDashboard}>
-              Go to Dashboard
+            <button type="button" style={styles.ctaButtonSmall} onClick={handleGetStarted}>
+              Get Started
             </button>
           </div>
 
@@ -100,9 +110,9 @@ export default function LandingPage({ onGoToDashboard }) {
             <button
               type="button"
               style={styles.ctaButtonFull}
-              onClick={onGoToDashboard}
+              onClick={() => { setMobileNavOpen(false); handleGetStarted() }}
             >
-              Go to Dashboard
+              Get Started
             </button>
           </div>
         )}
@@ -123,8 +133,8 @@ export default function LandingPage({ onGoToDashboard }) {
             moment they actually need one.
           </p>
           <div style={styles.heroActions}>
-            <button type="button" style={styles.ctaButtonLarge} onClick={onGoToDashboard}>
-              Go to Dashboard
+            <button type="button" style={styles.ctaButtonLarge} onClick={handleGetStarted}>
+              Get Started
               <ArrowRight size={18} />
             </button>
             <a href="#features" style={styles.secondaryLink}>
@@ -163,11 +173,11 @@ export default function LandingPage({ onGoToDashboard }) {
         <span>© {new Date().getFullYear()} AeroReply. All rights reserved.</span>
       </footer>
 
-      {/* ------------------------ Live widget demo -------------------------- */}
+      {/* ----------- Landing-only AI assistant widget (no handoff) ---------- */}
       <div style={styles.widgetArea}>
         {widgetOpen && (
           <div style={styles.widgetFrame}>
-            <ChatWidget />
+            <ChatWidget variant="landing" />
           </div>
         )}
         <button
