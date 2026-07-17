@@ -67,8 +67,10 @@
   /* ── 4. Inject base widget styles ─────────────────────────────────────── */
   var baseStyle = document.createElement('style');
   baseStyle.textContent = [
-    '#ar-launcher{position:fixed;bottom:24px;right:24px;left:auto;z-index:2147483646;width:56px;height:56px;border-radius:50%;border:none;background:#0f172a;color:#ffffff;cursor:pointer;box-shadow:0 10px 26px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;transition:transform 0.2s,background 0.2s;}',
-    '#ar-launcher:hover{transform:scale(1.08);}',
+    '@keyframes ar-pulse{0%,100%{box-shadow:0 12px 30px rgba(0,0,0,0.45),0 0 0 0 rgba(59,130,246,0.45)}65%{box-shadow:0 12px 30px rgba(0,0,0,0.45),0 0 0 16px rgba(59,130,246,0)}}',
+    '#ar-launcher{position:fixed;bottom:24px;right:24px;left:auto;z-index:2147483646;width:62px;height:62px;border-radius:50%;border:none;background:#0f172a;color:#ffffff;cursor:pointer;box-shadow:0 12px 30px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;padding:0;overflow:hidden;animation:ar-pulse 2.8s ease-in-out infinite;transition:transform 0.2s ease,background 0.2s ease;}',
+    '#ar-launcher:hover{transform:scale(1.10)!important;animation:none;}',
+    '#ar-launcher:active{transform:scale(0.96)!important;animation:none;}',
     '#ar-frame{position:fixed;bottom:90px;right:24px;left:auto;z-index:2147483645;width:380px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 120px);border:1px solid #2d3648;border-radius:18px;overflow:hidden;background:linear-gradient(180deg,#131a2a 0%,#0e1420 100%);font-family:system-ui,sans-serif;font-size:14px;color:#f9fafb;box-shadow:0 20px 50px rgba(0,0,0,0.5);display:none;flex-direction:column;}',
     '#ar-frame.ar-open{display:flex;}',
     '#ar-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:#0f172a;border-bottom:1px solid #2d3648;flex-shrink:0;}',
@@ -103,11 +105,27 @@
   document.head.appendChild(configStyle);
 
   /* ── 5. Build DOM ─────────────────────────────────────────────────────── */
+  // Default launcher icon: the custom SVG asset served from the gateway origin.
+  // Falls back to the inline SVG if the asset path returns an error.
+  function getDefaultLauncherHtml() {
+    return '<img src="' + GATEWAY_ORIGIN + '/assets/chat-launcher.svg"'
+      + ' width="38" height="38" alt="" draggable="false"'
+      + ' style="pointer-events:none;display:block;border-radius:0;"'
+      + ' onerror="this.outerHTML=\'' + getIconSvg('speech-bubble').replace(/'/g, "\\'") + '\'" />';
+  }
+
+  // Returns the right HTML for a given icon name.
+  // 'speech-bubble' uses the asset file; others use inline SVG strings.
+  function getLauncherHtml(name) {
+    if (!name || name === 'speech-bubble') return getDefaultLauncherHtml();
+    return getIconSvg(name);
+  }
+
   // Launcher button
   var launcher = document.createElement('button');
   launcher.id = 'ar-launcher';
   launcher.setAttribute('aria-label', 'Open AeroReply chat');
-  launcher.innerHTML = getIconSvg('speech-bubble');
+  launcher.innerHTML = getDefaultLauncherHtml();
   document.body.appendChild(launcher);
 
   // Chat frame
@@ -152,7 +170,7 @@
     var opp       = pos === 'left' ? 'right' : 'left';
     var offset    = Number(cfg.offset) || 20;
     var offsetPx  = offset + 'px';
-    var frameBottomPx = (offset + 66) + 'px';
+    var frameBottomPx = (offset + 72) + 'px';
 
     // ── Cascade overrides ──
     configStyle.textContent = [
@@ -190,7 +208,7 @@
     if (subtitleEl) subtitleEl.textContent = cfg.widgetSubtitle || 'Typically replies in minutes';
 
     // ── Launcher icon (when closed) ──
-    var currentIcon = getIconSvg(cfg.widgetIcon);
+    var currentIcon = getLauncherHtml(cfg.widgetIcon);
     launcher.innerHTML = currentIcon;
     launcher.setAttribute('aria-label', 'Open AeroReply chat');
 
@@ -208,9 +226,11 @@
     if (isOpen) {
       launcher.innerHTML = CLOSE_SVG;
       launcher.setAttribute('aria-label', 'Close chat');
+      launcher.style.animation = 'none'; // pause pulse while open
     } else {
-      launcher.innerHTML = launcher._arClosedIcon || getIconSvg('speech-bubble');
+      launcher.innerHTML = launcher._arClosedIcon || getDefaultLauncherHtml();
       launcher.setAttribute('aria-label', 'Open AeroReply chat');
+      launcher.style.animation = ''; // restore pulse
     }
   }
   launcher.addEventListener('click', toggleFrame);
