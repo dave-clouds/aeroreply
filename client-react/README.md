@@ -1,151 +1,118 @@
-# AeroReply Frontend Client
+# AeroReply — Frontend Client
 
-The React + Vite frontend for AeroReply, an AI-powered hybrid support
-platform. This app is one of three services that make up AeroReply (see the
-[root README](../README.md) for the full architecture); it has no direct
-database or AI logic of its own and instead talks to `gateway-node` over
-REST (`/api/...`) and Socket.io (`/socket.io`), both proxied through Vite in
-development.
+React + Vite frontend for the AeroReply platform. Serves the public landing page, the authentication flow (Login / Register), and the internal Agent Dashboard. Talks to `gateway-node` over `/api` (REST) and `/socket.io` (real-time), both proxied through Vite in development — no hardcoded URLs needed.
 
-This package houses three things in one app: the customer-facing
-**Landing Page** (with an embedded `ChatWidget` demo), the authentication
-flow (**Login** / **Register**), and the internal **Agent Dashboard** used by
-support agents.
+## Running locally
+
+The frontend only works end-to-end when the companion gateway (`gateway-node`, port 3001) and AI service (`ai-python`, port 8000) are also running.
+
+```bash
+# From the repo root, start the gateway and AI service first (see root README).
+# Then:
+
+cd client-react
+npm install      # install dependencies
+npm run dev      # start Vite dev server → http://localhost:5000
+```
+
+Other scripts:
+
+```bash
+npm run build    # production build → dist/
+npm run preview  # preview the production build locally
+npm run lint     # ESLint
+```
+
+---
+
+## Quick start — Termux (Android mobile terminal)
+
+```bash
+# Install runtimes (if not already done via root README)
+pkg install -y nodejs
+
+# Inside the client-react directory
+npm install
+npm run dev
+```
+
+The Vite dev server listens on port 5000. Open `http://localhost:5000` in any browser on your device.
+
+> Vite's proxy config already forwards `/api` and `/socket.io` to `localhost:3001`, so the gateway must be running in another Termux session for login, registration, and chat to work.
+
+---
 
 ## Project structure
 
 ```
 src/
 ├── App.jsx                    # React Router route table (/, /login, /register, /dashboard)
-├── main.jsx                   # Entry point — wraps the app in AuthProvider + SocketProvider
+├── main.jsx                   # Entry point — wraps app in AuthProvider + SocketProvider
 ├── services/
 │   └── api.js                 # Axios instance — baseURL '/api', attaches JWT automatically
 ├── context/
-│   ├── AuthContext.jsx        # useAuth() — user/token/loading state, register/login/logout
+│   ├── AuthContext.jsx        # useAuth() — user/token/loading + register/login/logout
 │   └── SocketContext.jsx      # Shared Socket.io client + connection state
 ├── components/
-│   ├── ChatWidget.jsx         # Customer-facing chat widget — human-first with
-│   │                          # AI fallback/lead-capture. Demoed live on the
-│   │                          # landing page, and also shipped separately via
-│   │                          # the embed snippet on the Settings Panel.
+│   ├── ChatWidget.jsx         # Customer-facing chat widget (human-first, AI fallback)
 │   └── ProtectedRoute.jsx     # Route guard — redirects to /login when unauthenticated
 ├── assets/
-│   └── hero.png               # Hero graphic used on the landing page
+│   └── hero.png               # Hero image on the landing page
 └── pages/
-    ├── LandingPage.jsx        # Public marketing page: navbar, hero, feature
-    │                          # pillars, and the live ChatWidget demo.
-    ├── Login.jsx              # Login form, wired to useAuth().login()
-    ├── Register.jsx           # Registration form, wired to useAuth().register()
-    ├── AgentDashboard.jsx     # Dashboard shell — responsive sidebar (hamburger
-    │                          # on mobile), view switching, and the Log out button.
-    ├── AeroHub.jsx            # Dashboard home — ticket stats, gateway status.
-    ├── AgentWorkspace.jsx     # Ticket queue + live reply console for agents.
-    ├── LiveVisitors.jsx       # Live visitor counter.
-    └── Settings.jsx           # Widget embed snippet + copy-to-clipboard.
+    ├── LandingPage.jsx        # Public marketing + "How to Use" page
+    ├── Login.jsx              # Login form
+    ├── Register.jsx           # Registration form
+    ├── AgentDashboard.jsx     # Dashboard shell — collapsible sidebar, view switching
+    ├── AeroHub.jsx            # Dashboard home — ticket stats, gateway status
+    ├── AgentWorkspace.jsx     # Live ticket queue + reply console
+    ├── LiveVisitors.jsx       # Real-time visitor counter
+    ├── Settings.jsx           # Widget embed snippet (Integration Code)
+    ├── WidgetSettings.jsx     # Widget appearance configuration
+    └── AccountSettings.jsx    # User profile (name, email, project ID)
+
+public/
+├── widget.js                  # Self-contained embeddable chat widget (no framework deps)
+└── assets/
+    └── chat-launcher.svg      # Default launcher button icon — swap this file to rebrand
 ```
 
-## State management & authentication
+## Authentication
 
-### `services/api.js` — the shared Axios instance
+All auth state lives in `AuthContext`. The shared `api.js` Axios instance attaches the JWT from `localStorage` automatically on every request — any new feature that calls the gateway should import it rather than using bare `fetch`.
 
-A single Axios instance is exported with `baseURL: '/api'` (relative, so it
-rides the same Vite proxy → `gateway-node` in dev, and the same origin in
-production). A request interceptor reads the JWT from `localStorage` on
-every outgoing call and attaches it automatically:
-
-```js
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
-})
-```
-
-Any new feature that needs to call the gateway should import this `api`
-instance rather than using a bare `fetch`/`axios` call — it guarantees
-authenticated requests without any extra wiring.
-
-### `context/AuthContext.jsx` — `useAuth()`
-
-`AuthProvider` (mounted around the whole app in `main.jsx`) holds three
-pieces of state — `user`, `token`, `loading` — and exposes:
-
-| Function | Behavior |
+| Hook | What you get |
 |---|---|
-| `register(name, email, password)` | `POST /api/auth/register`, stores the returned token in `localStorage`, sets `user`/`token` state. |
-| `login(email, password)` | `POST /api/auth/login`, same storage/state behavior as `register`. |
-| `logout()` | Clears `localStorage` and state immediately, then fires a best-effort `POST /api/auth/logout` (stateless — errors are ignored). |
-
-On first mount, an initialization `useEffect` checks `localStorage` for an
-existing token. If found, it calls `GET /api/auth/me` (via the shared `api`
-instance, so the token is attached automatically) to restore `user`; an
-invalid/expired token is cleared. `loading` stays `true` until this
-resolves, so consumers (like `ProtectedRoute`) never briefly render the
-wrong screen while the session is being verified.
-
-Any component can access this state with:
-
-```jsx
-import { useAuth } from '../context/AuthContext'
-
-const { user, token, loading, login, register, logout } = useAuth()
-```
-
-### `pages/Login.jsx` & `pages/Register.jsx`
-
-Both forms call `useAuth()` directly — no local mock state. On submit they:
-1. Set a `submitting` flag (disables the button and swaps its label, e.g.
-   "Logging in…" / "Creating account…") to prevent duplicate submissions.
-2. Call `login(...)` / `register(...)`.
-3. On success, `useNavigate()` redirects to `/dashboard`.
-4. On failure, the backend's `error.message` (e.g. "Invalid email or
-   password", "User already exists") is captured into local `error` state
-   and rendered as an inline alert above the form.
-
-### `components/ProtectedRoute.jsx`
-
-```jsx
-<ProtectedRoute>
-  <AgentDashboard />
-</ProtectedRoute>
-```
-
-Reads `user`, `token`, `loading` from `useAuth()`:
-- **`loading === true`** → renders a "Loading secure session…" indicator
-  (prevents a flash of the login screen while the token is being verified).
-- **No `user`/`token`** → `<Navigate to="/login" replace />`.
-- **Authenticated** → renders `children`.
+| `useAuth().user` | Current user object (`_id`, `name`, `email`, `projectId`, `widgetSettings`) or `null` |
+| `useAuth().token` | Raw JWT string or `null` |
+| `useAuth().loading` | `true` while the stored token is being verified on first load |
+| `useAuth().login(email, pw)` | POST `/api/auth/login`, stores token, sets state |
+| `useAuth().register(name, email, pw)` | POST `/api/auth/register`, same behaviour |
+| `useAuth().logout()` | Clears localStorage + state, fires a best-effort logout request |
 
 ## Routing
 
-Routing is handled by `react-router-dom`, set up in `App.jsx`:
-
-| Path | Element | Notes |
+| Path | Component | Access |
 |---|---|---|
-| `/` | `LandingPage` | Public marketing page. "Go to Dashboard" navigates to `/dashboard`. |
-| `/login` | `Login` | Public. Links to `/register`. |
-| `/register` | `Register` | Public. Links to `/login`. |
-| `/dashboard` | `ProtectedRoute` → `AgentDashboard` | Requires an authenticated session; unauthenticated visitors are redirected to `/login`. |
+| `/` | `LandingPage` | Public |
+| `/login` | `Login` | Public |
+| `/register` | `Register` | Public |
+| `/dashboard` | `ProtectedRoute → AgentDashboard` | Authenticated only |
 
-The dashboard shell (`AgentDashboard.jsx`) has its own internal Log out
-button in the sidebar, wired to `useAuth().logout()` followed by
-`navigate('/login')`.
+`ProtectedRoute` checks `loading`, `user`, and `token` from `useAuth()`. While loading it shows a session indicator; unauthenticated visitors are redirected to `/login`.
 
-## Running locally
+## Environment variables (Vite)
 
-This package only works end-to-end when the companion `Gateway`
-(`gateway-node`, port 3001) and `AI Service` (`ai-python`, port 8000) are
-also running — Vite proxies `/api` and `/socket.io` to `localhost:3001`.
+No Vite-level `.env` variables are required for development — all backend communication uses relative paths proxied through Vite. The proxy target is set in `vite.config.js`:
 
-```bash
-# from client-react/
-npm install          # install dependencies
-npm run dev          # start the Vite dev server — serves on port 5000
-npm run build         # production build, output written to dist/
-npm run preview       # preview a production build locally
-npm run lint          # ESLint
+```
+/api       → http://localhost:3001
+/socket.io → http://localhost:3001
 ```
 
-On Replit, `npm run dev` is already wired up as the `Start application`
-workflow, run in parallel with the `Gateway` and `AI Service` workflows
-under the top-level `Project` workflow.
+For production deployments, point these to your deployed gateway URL.
+
+## Widget embed
+
+The embeddable widget lives at `public/widget.js` and is served as a static file. It is a self-contained IIFE — no React, no bundler, no external CDN. The launcher icon is loaded from `public/assets/chat-launcher.svg`; replacing that file is the fastest way to rebrand the widget without touching JavaScript.
+
+See **Widget Settings** in the agent dashboard to configure colours, title, position, and icon at runtime (changes are stored in the database and applied per-project on each visitor connection).

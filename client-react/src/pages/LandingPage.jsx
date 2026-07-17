@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Bot, LayoutDashboard, Users2, ArrowRight, Menu, X as CloseIcon } from 'lucide-react'
 import ChatWidget from '../components/ChatWidget'
+import { useAuth } from '../context/AuthContext'
 import heroImage from '../assets/hero.png'
 
 const NAV_LINKS = [
@@ -13,30 +14,62 @@ const NAV_LINKS = [
 const FEATURES = [
   {
     icon: Bot,
-    title: 'Automated Gemini Responses',
+    title: 'Drop the Snippet, Go Live Instantly',
     description:
-      'Every incoming message is triaged instantly by Google Gemini — concise, on-brand replies for order tracking, refunds, and product questions, with intent detection built in.',
+      'Paste one self-contained <script> tag onto any HTML page — no framework, no bundler, no CDN required. The widget reads your Project ID, connects to your gateway, and loads your saved branding automatically.',
   },
   {
     icon: LayoutDashboard,
-    title: 'Real-time Agent Dashboard',
+    title: 'AI Handles the First Line',
     description:
-      'A live ticket queue and message console keep your team on top of every conversation, with visitor counts and gateway health visible at a glance.',
+      'Every incoming message is answered instantly by Google Gemini — concise, on-brand replies with intent detection built in. Your agents are only paged when a conversation genuinely needs a human.',
   },
   {
     icon: Users2,
-    title: 'Seamless Human Handoff',
+    title: 'Agents Step In When It Matters',
     description:
-      'When a conversation needs a person — frustration, a repeated complaint, an explicit request — AeroReply escalates automatically and routes it straight to an available agent.',
+      'When Gemini detects frustration, a repeated complaint, or an explicit "talk to a person" — it escalates automatically. The agent sees the full history and takes over in real time, without the customer re-explaining anything.',
+  },
+]
+
+const HOW_TO_STEPS = [
+  {
+    step: '01',
+    title: 'Create your account',
+    body: 'Register at aeroreply.app. Your unique Project ID is generated automatically — every API call, socket connection, and widget embed is scoped to it.',
+  },
+  {
+    step: '02',
+    title: 'Customise your widget',
+    body: 'Open More → Widget Settings in the agent dashboard. Pick your brand colours, chat title, launcher icon, and screen position. Changes are saved to the database and applied live on the next visitor connection.',
+  },
+  {
+    step: '03',
+    title: 'Embed the snippet',
+    body: 'Copy the one-line <script> tag from More → Integration Code and paste it before </body> on any website. The widget fetches your branding, connects to your agent room, and is ready to chat immediately.',
+  },
+  {
+    step: '04',
+    title: 'Manage conversations',
+    body: 'Open the Agent Dashboard on any device. The Ticket Queue shows every active conversation. Click into one to read the full history and reply in real time. When you are offline, the widget captures visitor emails automatically.',
   },
 ]
 
 // The public marketing surface for AeroReply. Pure presentation — the only
 // live functionality on this page is the embedded ChatWidget demo, which
-// uses the exact same component (and socket wiring) that ships to customers.
-export default function LandingPage({ onGoToDashboard }) {
+// uses the landing variant: AI-only sales assistant that never triggers
+// human handoff or alerts agent dashboards.
+export default function LandingPage() {
+  const { user } = useAuth()
+  const navigate = useNavigate()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [widgetOpen, setWidgetOpen] = useState(false)
+
+  // If already authenticated, go straight to the dashboard.
+  // Otherwise send the visitor to the register flow.
+  function handleGetStarted() {
+    navigate(user ? '/dashboard' : '/register')
+  }
 
   return (
     <div style={styles.page}>
@@ -62,8 +95,8 @@ export default function LandingPage({ onGoToDashboard }) {
             <Link to="/login" style={styles.navLoginLink}>
               Log in
             </Link>
-            <button type="button" style={styles.ctaButtonSmall} onClick={onGoToDashboard}>
-              Go to Dashboard
+            <button type="button" style={styles.ctaButtonSmall} onClick={handleGetStarted}>
+              Get Started
             </button>
           </div>
 
@@ -100,9 +133,9 @@ export default function LandingPage({ onGoToDashboard }) {
             <button
               type="button"
               style={styles.ctaButtonFull}
-              onClick={onGoToDashboard}
+              onClick={() => { setMobileNavOpen(false); handleGetStarted() }}
             >
-              Go to Dashboard
+              Get Started
             </button>
           </div>
         )}
@@ -111,20 +144,20 @@ export default function LandingPage({ onGoToDashboard }) {
       {/* ------------------------------ Hero ------------------------------- */}
       <section className="lp-hero" style={styles.hero}>
         <div className="lp-hero-copy" style={styles.heroCopy}>
-          <span style={styles.heroEyebrow}>Modular AI + human support platform</span>
+          <span style={styles.heroEyebrow}>Embeddable AI + Human Live Chat</span>
           <h1 style={styles.heroHeadline}>
-            AI-Powered Speed.
+            Your Site, Your Brand.
             <br />
-            Human-Touch Precision.
+            Real Support in Minutes.
           </h1>
           <p style={styles.heroSub}>
-            AeroReply pairs a Gemini-driven response engine with a real-time agent
-            dashboard, so every customer gets an instant answer — and a human the
-            moment they actually need one.
+            AeroReply gives any website a production-ready live-chat widget — backed by
+            Google Gemini for instant AI replies and a real-time agent dashboard for
+            when a human touch is needed. Embed in one line. Customise without code.
           </p>
           <div style={styles.heroActions}>
-            <button type="button" style={styles.ctaButtonLarge} onClick={onGoToDashboard}>
-              Go to Dashboard
+            <button type="button" style={styles.ctaButtonLarge} onClick={handleGetStarted}>
+              Get Started
               <ArrowRight size={18} />
             </button>
             <a href="#features" style={styles.secondaryLink}>
@@ -142,8 +175,8 @@ export default function LandingPage({ onGoToDashboard }) {
       {/* ---------------------------- Features ----------------------------- */}
       <section id="features" style={styles.features}>
         <div style={styles.featuresHeader}>
-          <span style={styles.sectionEyebrow}>Why teams switch to AeroReply</span>
-          <h2 style={styles.sectionTitle}>Three pillars, one conversation thread</h2>
+          <span style={styles.sectionEyebrow}>How AeroReply works</span>
+          <h2 style={styles.sectionTitle}>From embed to conversation in minutes</h2>
         </div>
 
         <div className="lp-feature-grid" style={styles.featureGrid}>
@@ -159,15 +192,49 @@ export default function LandingPage({ onGoToDashboard }) {
         </div>
       </section>
 
+      {/* ─────────────────── How to Use ──────────────────── */}
+      <section id="docs" style={styles.howTo}>
+        <div style={styles.featuresHeader}>
+          <span style={{ ...styles.sectionEyebrow, color: '#34d399' }}>Step-by-step guide</span>
+          <h2 style={styles.sectionTitle}>How to use AeroReply</h2>
+          <p style={{ margin: '8px 0 0', color: '#6b7280', fontSize: '15px', lineHeight: 1.6 }}>
+            Four steps from zero to a live, branded chat widget on any website.
+          </p>
+        </div>
+
+        <div className="lp-steps-grid" style={styles.stepsGrid}>
+          {HOW_TO_STEPS.map(({ step, title, body }) => (
+            <div key={step} style={styles.stepCard}>
+              <span style={styles.stepNumber}>{step}</span>
+              <h3 style={styles.stepTitle}>{title}</h3>
+              <p style={styles.stepBody}>{body}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Embed snippet preview */}
+        <div style={styles.snippetPreview}>
+          <p style={styles.snippetLabel}>Your embed snippet looks like this:</p>
+          <pre style={styles.snippetCode}>{`<script
+  src="https://your-domain/widget.js"
+  data-aeroreply-project-id="YOUR_PROJECT_ID"
+  async
+></script>`}</pre>
+          <p style={styles.snippetHint}>
+            Copy it from <strong style={{ color: '#f9fafb' }}>More → Integration Code</strong> in your dashboard after registering.
+          </p>
+        </div>
+      </section>
+
       <footer style={styles.footer}>
         <span>© {new Date().getFullYear()} AeroReply. All rights reserved.</span>
       </footer>
 
-      {/* ------------------------ Live widget demo -------------------------- */}
+      {/* ----------- Landing-only AI assistant widget (no handoff) ---------- */}
       <div style={styles.widgetArea}>
         {widgetOpen && (
           <div style={styles.widgetFrame}>
-            <ChatWidget />
+            <ChatWidget variant="landing" />
           </div>
         )}
         <button
@@ -199,6 +266,10 @@ const RESPONSIVE_CSS = `
     .lp-hero-art { margin-top: 32px; }
 
     .lp-feature-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    .lp-steps-grid {
       grid-template-columns: 1fr !important;
     }
   }
@@ -471,6 +542,90 @@ const styles = {
     color: '#9ca3af',
     fontSize: '14px',
     lineHeight: 1.65,
+  },
+
+  // How to Use section
+  howTo: {
+    maxWidth: '1180px',
+    margin: '0 auto',
+    width: '100%',
+    padding: '0 24px 96px',
+    boxSizing: 'border-box',
+  },
+  stepsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '20px',
+    margin: '40px 0 48px',
+  },
+  stepCard: {
+    background: 'linear-gradient(180deg, #0d1520 0%, #0b1018 100%)',
+    border: '1px solid #1f2937',
+    borderRadius: '16px',
+    padding: '28px 26px',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  stepNumber: {
+    display: 'inline-block',
+    fontWeight: 900,
+    fontSize: '44px',
+    letterSpacing: '-2px',
+    lineHeight: 1,
+    marginBottom: '14px',
+    background: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    backgroundClip: 'text',
+  },
+  stepTitle: {
+    margin: '0 0 10px',
+    fontSize: '17px',
+    fontWeight: 700,
+    color: '#f9fafb',
+    letterSpacing: '-0.2px',
+  },
+  stepBody: {
+    margin: 0,
+    color: '#6b7280',
+    fontSize: '14px',
+    lineHeight: 1.65,
+  },
+
+  // Embed snippet preview block
+  snippetPreview: {
+    background: '#0d1117',
+    border: '1px solid #21262d',
+    borderRadius: '14px',
+    padding: '24px 28px',
+    maxWidth: '680px',
+  },
+  snippetLabel: {
+    margin: '0 0 12px',
+    color: '#8b949e',
+    fontSize: '13px',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  snippetCode: {
+    margin: '0 0 12px',
+    padding: '16px 18px',
+    background: '#161b22',
+    border: '1px solid #30363d',
+    borderRadius: '8px',
+    color: '#79c0ff',
+    fontSize: '13px',
+    fontFamily: '"Fira Code", "Cascadia Code", "Courier New", monospace',
+    overflowX: 'auto',
+    lineHeight: 1.6,
+    whiteSpace: 'pre',
+  },
+  snippetHint: {
+    margin: 0,
+    color: '#6b7280',
+    fontSize: '13px',
+    lineHeight: 1.55,
   },
 
   // Footer

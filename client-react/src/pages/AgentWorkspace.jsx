@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useSocket } from '../context/SocketContext'
+import api from '../services/api'
 
 // The live ticket queue + reply console for human agents. Customer
 // interactions arrive here automatically (via socket events) — there is
@@ -31,14 +32,14 @@ export default function AgentWorkspace() {
   useEffect(() => {
     const controller = new AbortController()
 
-    fetch('/api/tickets', { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error(`Server returned ${res.status}`)
-        return res.json()
-      })
-      .then(({ tickets: fetched }) => {
+    // Fetched through the shared `api` instance so the JWT is attached —
+    // the backend scopes the result to this agent's own project, so no
+    // other tenant's tickets ever reach this queue.
+    api
+      .get('/tickets', { signal: controller.signal })
+      .then(({ data }) => {
         setTickets(
-          fetched.map((t) => ({
+          data.tickets.map((t) => ({
             conversationId: t.conversationId,
             lastMessage: null,
             timestamp: t.updatedAt,
@@ -48,7 +49,7 @@ export default function AgentWorkspace() {
         setFetchState('done')
       })
       .catch((err) => {
-        if (err.name === 'AbortError') return
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return
         setFetchError(err.message)
         setFetchState('error')
       })
@@ -150,11 +151,10 @@ export default function AgentWorkspace() {
       }
 
       try {
-        const res = await fetch(`/api/tickets/${conversationId}`, {
+        const { data } = await api.get(`/tickets/${conversationId}`, {
           signal: controller.signal,
         })
-        if (!res.ok) throw new Error(`Server returned ${res.status}`)
-        const { ticket } = await res.json()
+        const { ticket } = data
 
         if (controller.signal.aborted) return
 
@@ -174,7 +174,7 @@ export default function AgentWorkspace() {
         pendingMessagesRef.current = []
         setHistoryState('done')
       } catch (err) {
-        if (err.name === 'AbortError') return
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return
 
         historyLoadedRef.current = true
         const buffered = pendingMessagesRef.current
